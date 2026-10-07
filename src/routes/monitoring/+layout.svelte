@@ -1,4 +1,5 @@
-﻿<script lang="ts">
+<script lang="ts">
+	import { classes } from '$lib/inference';
 	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import type { Camera } from '$lib/camera';
@@ -183,6 +184,21 @@
 							<p class="mt-4 text-3xl font-bold text-slate-900">
 								{viewerState.result?.clase ?? 'Esperando primera ventana'}
 							</p>
+							<div class="mt-6 flex items-end justify-between gap-3">
+								<span class="text-sm text-slate-600">Confianza</span><strong
+									class="text-3xl text-slate-900"
+									>{viewerState.result
+										? (viewerState.result.confianza * 100).toFixed(2) + ' %'
+										: '—'}</strong
+								>
+							</div>
+							{#if viewerState.result}<progress
+									max="100"
+									value={viewerState.result.confianza * 100}
+									aria-label="Porcentaje de confianza"
+									class="mt-3 h-3 w-full accent-blue-600"
+									>{(viewerState.result.confianza * 100).toFixed(2)} %</progress
+								>{/if}
 						</div>
 						{#if viewerState.stale}<p class="mt-3 text-sm font-semibold text-amber-800">
 								Datos sin actualizar
@@ -197,7 +213,21 @@
 										? 'Sin alerta confirmada'
 										: 'Esperando estado de alerta'}
 						</p>
-
+						{#each classes as label}<div class="mt-3">
+								<div class="flex justify-between text-sm">
+									<span>{label}</span><span
+										>{viewerState.result?.probabilities
+											? (viewerState.result.probabilities[label] * 100).toFixed(2) + ' %'
+											: '—'}</span
+									>
+								</div>
+								<div class="mt-1 h-2 rounded bg-slate-100">
+									<div
+										class="h-2 rounded bg-blue-600"
+										style:width={(viewerState.result?.probabilities?.[label] ?? 0) * 100 + '%'}
+									></div>
+								</div>
+							</div>{/each}
 						<dl class="mt-5 space-y-2 text-sm text-slate-600">
 							<div class="flex justify-between gap-3">
 								<dt>Frames recibidos</dt>
