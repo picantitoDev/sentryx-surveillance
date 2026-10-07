@@ -1,5 +1,5 @@
 {
-	"name": "polyp-detection",
+	"name": "sentryx-surveillance",
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
@@ -13,11 +13,13 @@
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"test:unit": "vitest",
-		"test": "npm run test:unit -- --run"
+		"test": "npm run test:unit -- --run",
+		"start": "node scripts/start.mjs"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
 		"@sveltejs/adapter-auto": "^7.0.1",
+		"@sveltejs/adapter-node": "^5.5.7",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@tailwindcss/vite": "^4.3.0",
@@ -43,5 +45,8 @@
 	"dependencies": {
 		"livekit-client": "^2.22.3",
 		"livekit-server-sdk": "^2.19.1"
+	},
+	"engines": {
+		"node": ">=24"
 	}
 }
