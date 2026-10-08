@@ -21,3 +21,31 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Backend Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp*/
+.coverage
+htmlcov/
+
+# Configuración privada (incluso entornos de pruebas)
+.env
+.env.*
+!.env.example
+
+# Datos y diagnósticos generados
+/backend/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.log
+/modelo/gpu_profile_*.json
+/modelo/gpu_validation.json
+
+# Pesos distribuidos aparte, no mediante Git normal
+/modelo/*.onnx
+/modelo/*.onnx.data

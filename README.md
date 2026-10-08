@@ -40,3 +40,23 @@ npm run build
 You can preview the production build with `npm run preview`.
 
 > To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+
+
+## Backend de inferencia SentriX
+
+El frontend SvelteKit permanece en la raíz (`src/`, `static/`, `package.json`).
+El backend Python está en `backend/`, y los adaptadores/metadatos de VideoMAE
+en `modelo/`. Los pesos se distribuyen aparte.
+
+- [Instalación, ejecución y pruebas del backend](backend/README.md)
+- [Modelo y obtención de pesos](modelo/README.md)
+- [Integración con el frontend y LiveKit](docs/backend/INTEGRACION_REPOSITORIO.md)
+- [Contrato de resultados](docs/backend/RESULTADOS_VIDEOMAE.md)
+- [Eventos confirmados](docs/backend/CONTRATO_ALERTAS_FRONTEND.md)
+- [Logs operativos](docs/backend/CONTRATO_LOGS_FRONTEND.md)
+
+La configuración privada del backend vive en `backend/.env`; el `.env` de la
+raíz pertenece al frontend. Ninguno se versiona. Ejecutar un único proceso del
+backend. Las rutas WebRTC directas corresponden al modo alternativo explícito.
+
+- [PostgreSQL, migración y usuarios con Argon2id](docs/backend/DATABASE.md)
