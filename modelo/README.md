@@ -2,6 +2,9 @@
 
 Modelo ONNX para detección y clasificación continua de acciones.
 
+El modelo también está publicado en Hugging Face:
+[picantitoo/videomae_ucf_crime_finetuned](https://huggingface.co/picantitoo/videomae_ucf_crime_finetuned).
+
 ## Clases
 
 0. normal
@@ -43,7 +46,9 @@ videomae_crime5_continuous.onnx.data deben permanecer juntos.
 Los pesos no están incluidos en Git. Solicitar al responsable del modelo los
 archivos `videomae_crime5_continuous.onnx` y
 `videomae_crime5_continuous.onnx.data`, y colocarlos juntos en esta carpeta.
-La ubicación compartida de descarga queda por acordar con el equipo.
+Consultar el repositorio de Hugging Face para los archivos publicados.
+El backend requiere los dos archivos ONNX indicados arriba; deben corresponder
+a la versión compatible con estos metadatos.
 `SHA256SUMS.txt` contiene los hashes esperados. No modificar los metadatos para
 acomodar otra versión del modelo sin validar su compatibilidad.
 
