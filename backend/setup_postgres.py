@@ -2,7 +2,10 @@
 import os
 from pathlib import Path
 import secrets
+import socket
 import subprocess
+import sys
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
 BIN = Path(os.environ.get("SENTRIX_POSTGRES_BIN", "C:/Program Files/PostgreSQL/18/bin"))
@@ -14,9 +17,49 @@ def run(tool, *args):
     subprocess.run([str(BIN / (tool + ".exe")), *map(str, args)], check=True)
 
 
+def ensure_running():
+    from dotenv import load_dotenv
+    load_dotenv(ENV, override=False)
+    url = urlsplit(os.environ.get("SENTRIX_DATABASE_URL", ""))
+    if url.scheme not in ("postgresql", "postgres") or not url.hostname:
+        raise SystemExit("Configurar SENTRIX_DATABASE_URL en backend/.env")
+    host, port = url.hostname, url.port or 5432
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            print(f"PostgreSQL disponible en {host}:{port}", flush=True)
+            return
+    except OSError:
+        pass
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        raise SystemExit(f"PostgreSQL remoto no responde en {host}:{port}")
+    candidates = [DATA, ROOT.parents[1] / "archivo_local/backend/data/postgres"]
+    configured_data = os.environ.get("SENTRIX_POSTGRES_DATA")
+    if configured_data:
+        candidates = [Path(configured_data)]
+    for data in candidates:
+        if not (data / "PG_VERSION").is_file():
+            continue
+        result = subprocess.run(
+            [str(BIN / "postgres.exe"), "-D", str(data), "-C", "port"],
+            capture_output=True, text=True, check=True)
+        if int(result.stdout.strip()) != port:
+            continue
+        print(f"Iniciando PostgreSQL local en el puerto {port}...", flush=True)
+        run("pg_ctl", "-D", data, "-l", data.parent / "postgres.log", "-w", "start")
+        return
+    raise SystemExit(
+        f"PostgreSQL no responde en {host}:{port}. "
+        "Configurar SENTRIX_POSTGRES_DATA con la carpeta del cluster existente.")
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--ensure-running"]:
+        ensure_running()
+        raise SystemExit(0)
+    if sys.argv[1:]:
+        raise SystemExit("Uso: setup_postgres.py [--ensure-running]")
     if DATA.exists():
-        raise SystemExit("El cluster ya existe. Arrancar con pg_ctl; consultar docs/DATABASE.md")
+        raise SystemExit(f'El cluster ya existe. Arrancar con: "{BIN / "pg_ctl.exe"}" -D "{DATA}" -l "{DATA.parent / "postgres.log"}" -w start')
     existing = ENV.read_text(encoding="utf-8") if ENV.exists() else ""
     if any(line.startswith("SENTRIX_DATABASE_URL=") and line.split("=", 1)[1].strip()
            for line in existing.splitlines()):

@@ -105,9 +105,9 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
     real_mode = predictor is None and selected_mode == "videomae"
     if predictor is None and selected_mode not in ("videomae", "mock"):
         raise ValueError("SENTRIX_PREDICTOR debe ser videomae o mock")
-    selected_transport = transport or os.getenv("SENTRIX_VIDEO_TRANSPORT", "livekit")
-    if selected_transport not in ("livekit", "webrtc"):
-        raise ValueError("SENTRIX_VIDEO_TRANSPORT debe ser livekit o webrtc")
+    selected_transport = transport or os.getenv("SENTRIX_VIDEO_TRANSPORT", "rtsp")
+    if selected_transport not in ("livekit", "webrtc", "rtsp"):
+        raise ValueError("SENTRIX_VIDEO_TRANSPORT debe ser livekit, webrtc o rtsp")
     receiver_type = WebRTCReceiver
     receiver_options = {"detection_store": store, "log_store": log_store, "alert_store": alert_store}
     policy_factory = lambda: EventPolicy(event_policy.thresholds)
@@ -115,6 +115,9 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
         from app.livekit_receiver import LiveKitReceiver
         receiver_type = LiveKitReceiver
         receiver_options["settings"] = livekit_settings
+    if selected_transport == "rtsp":
+        from app.rtsp_receiver import RTSPReceiver
+        receiver_type = RTSPReceiver
     def predict_window(frames, timestamp):
         window = Window(frames=frames, timestamp=timestamp)
         return Prediction.model_validate(app.state.predictor.predict(window)).model_dump(exclude_none=True)
@@ -141,6 +144,8 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
                     finally:
                         connection.close()
             await asyncio.to_thread(initialize_storage)
+        if selected_transport == "rtsp":
+            await receiver.initialize_cameras()
         try:
             try:
                 await asyncio.to_thread(alert_store.interrupt, reason="service_restarted")
@@ -172,13 +177,15 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
             if real_mode:
                 app.state.predictor = None
     app = FastAPI(title="SentriX · Servicio de inferencia", version="0.6.0", lifespan=lifespan,
-                  description="VideoMAE CUDA; recepción LiveKit y consulta de resultados HTTP.")
+                  description="VideoMAE CUDA; recepción RTSP/RTSPS, WebRTC o LiveKit y consulta de resultados HTTP.")
     app.add_middleware(BodyLimit)
     origins = [value.strip() for value in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if value.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins,
-                       allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"],
+                       allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type", "X-API-Key"],
                        expose_headers=["X-Detection-ID"])
     app.include_router(receiver.router)
+    if selected_transport == "rtsp":
+        app.include_router(receiver.camera_router)
     app.include_router(logs_router(log_store))
     app.include_router(alerts_router(alert_store))
     app.state.webrtc = receiver
@@ -193,6 +200,8 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
         video_status = {"video_transport": selected_transport}
         if selected_transport == "livekit":
             video_status["livekit"] = receiver.connection_status()
+        if selected_transport == "rtsp":
+            video_status["rtsp"] = receiver.connection_status()
         if real_mode:
             if app.state.predictor is None:
                 raise HTTPException(503, "Modelo no disponible")
