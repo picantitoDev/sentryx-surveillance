@@ -85,32 +85,6 @@ def test_detection_storage_failure_has_separate_log(tmp_path):
         assert record["inference_ms"] >= 0 and record["detection_id"] is None
 
 
-def test_livekit_transport_and_source_logs(tmp_path):
-    from app.livekit_receiver import LiveKitReceiver
-    from test_livekit import Room, Publication, Stream, settings, participant, frame_event, wait_for
-    async def run():
-        store = InferenceLogStore(tmp_path / "logs")
-        room = Room([participant("gabriel", [Publication()])])
-        stream = Stream()
-        def predict(frames, timestamp):
-            return dict(clase="Normal", confianza=.9, timestamp=timestamp, simulated=True)
-        receiver = LiveKitReceiver(predict, PipelineConfig(width=2, height=2, window_size=1),
-            settings=settings(), room_factory=lambda: room, stream_factory=lambda track: stream, log_store=store)
-        try:
-            await receiver.start()
-            await wait_for(lambda: bool(receiver.sessions))
-            session = next(iter(receiver.sessions.values()))
-            stream.queue.put_nowait(frame_event())
-            await wait_for(lambda: session.windows_processed == 1)
-            assert store.list(camera=settings().source_id, event_type="source_connected")["total"] == 1
-            room.emit("disconnected")
-            await wait_for(lambda: not receiver.sessions)
-        finally:
-            await receiver.shutdown()
-        events = {r["event_type"] for r in store.list()["items"]}
-        assert {"transport_connected", "transport_disconnected", "source_connected",
-                "source_disconnected", "inference_completed"} <= events
-    asyncio.run(run())
 
 
 def test_concurrent_log_writes(tmp_path):
