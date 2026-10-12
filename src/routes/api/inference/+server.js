@@ -1,12 +1,37 @@
 import { json } from '@sveltejs/kit';
-import { getCamera } from '#lib/server/camera-store.js';
 import { callInference } from '#lib/server/inference-api.js';
+import { getRegisteredCamera, getRegisteredCameras } from '#lib/server/camera-registry.js';
 
 export async function GET({ url }) {
-  const camera = await getCamera(url.searchParams.get('id'));
-  if (!camera) {
-    return json({ available: false, source: null, latestDetection: null, alerts: [], detections: [] });
+  let health;
+  try {
+    health = await callInference('/health');
+  } catch (error) {
+    return json({
+      available: false, health: null, source: null, latestDetection: null,
+      alerts: [], detections: [], error: error instanceof Error ? error.message : String(error)
+    }, { status: 502 });
   }
+
+  const requestedId = url.searchParams.get('id');
+  let camera;
+  try {
+    camera = requestedId
+      ? await getRegisteredCamera(requestedId)
+      : (await getRegisteredCameras())[0] ?? null;
+  } catch (error) {
+    return json({
+      available: health?.status === 'ok', health, source: null, latestDetection: null,
+      alerts: [], detections: [], error: error instanceof Error ? error.message : String(error)
+    });
+  }
+  if (!camera) {
+    return json({
+      available: health?.status === 'ok', health, source: null,
+      latestDetection: null, alerts: [], detections: []
+    });
+  }
+
   try {
     const [source, detections, alertsPage] = await Promise.all([
       callInference(`/sources/${encodeURIComponent(camera.id)}/status`),
@@ -15,9 +40,10 @@ export async function GET({ url }) {
     ]);
     const registeredTime = new Date(camera.registeredAt).getTime();
     /** @param {{ fecha_hora: string }} row */
-    const isRecent = (row) => new Date(row.fecha_hora).getTime() >= registeredTime;
+    const isRecent = (row) => !Number.isFinite(registeredTime) || new Date(row.fecha_hora).getTime() >= registeredTime;
     return json({
-      available: true,
+      available: health?.status === 'ok',
+      health,
       source,
       detections: detections.filter(isRecent),
       latestDetection: detections.find(isRecent) ?? null,
@@ -25,8 +51,8 @@ export async function GET({ url }) {
     });
   } catch (error) {
     return json({
-      available: false, source: null, latestDetection: null,
+      available: health?.status === 'ok', health, source: null, latestDetection: null,
       alerts: [], detections: [], error: error instanceof Error ? error.message : String(error)
-    }, { status: 502 });
+    });
   }
 }
