@@ -1,4 +1,5 @@
 import asyncio
+import os
 import httpx
 from aiortc import RTCPeerConnection, RTCConfiguration, RTCSessionDescription, VideoStreamTrack
 from fastapi.testclient import TestClient
@@ -35,7 +36,7 @@ def test_real_webrtc_frames_and_cleanup():
         viewers = []
         try:
             async with app.router.lifespan_context(app):
-                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test', headers={'X-API-Key': os.environ['SENTRIX_CONTROL_API_KEY']}) as client:
                     await sender.setLocalDescription(await sender.createOffer())
                     offer = {'type': 'offer', 'sdp': sender.localDescription.sdp, 'source_id': 'test_camera'}
                     response = await client.post('/webrtc/offer', json=offer)

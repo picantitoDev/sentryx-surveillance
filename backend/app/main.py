@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Query, Response
 from app.detections import DetectionStore
 from app.inference_logs import InferenceLogStore, logs_router
 from app.alerts import AlertStore, EventPolicy, alerts_router
+from app.security import ApiKeyGuard, document_api_key
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -173,9 +174,11 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
     app = FastAPI(title="SentriX · Servicio de inferencia", version="0.6.0", lifespan=lifespan,
                   description="VideoMAE CUDA; recepción RTSP/RTSPS o WebRTC y consulta de resultados HTTP.")
     app.add_middleware(BodyLimit)
-    origins = [value.strip() for value in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if value.strip()]
+    app.add_middleware(ApiKeyGuard)
+    origins = [value.strip() for value in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,https://sentrix-vercel-upload.vercel.app").split(",") if value.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins,
-                       allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type", "X-API-Key"],
+                       allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                       allow_headers=["Content-Type", "Authorization", "X-API-Key"],
                        expose_headers=["X-Detection-ID"])
     app.include_router(receiver.router)
     if selected_transport == "rtsp":
@@ -250,6 +253,7 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
         if detection is None:
             raise HTTPException(404, "Detección no encontrada")
         return detection
+    document_api_key(app)
     return app
 
 app = create_app()
