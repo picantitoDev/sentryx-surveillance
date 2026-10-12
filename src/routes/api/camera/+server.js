@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { getCamera, getCameras, putCamera, removeCamera } from '#lib/server/camera-store.js';
 import { callInference } from '#lib/server/inference-api.js';
+import { getRegisteredCamera, getRegisteredCameras, mapCamera } from '#lib/server/camera-registry.js';
 
 /** @param {unknown} value */
 function normalizeUrl(value) {
@@ -20,7 +20,7 @@ function cameraIdFromUrl(value) {
 
 export async function GET() {
   try {
-    return json({ cameras: await getCameras() });
+    return json({ cameras: await getRegisteredCameras() });
   } catch (error) {
     console.error('Error al obtener las cámaras:', error);
     return json({ error: 'No se pudieron consultar las cámaras.' }, { status: 500 });
@@ -41,7 +41,7 @@ export async function POST({ request }) {
   }
 
   try {
-    const cameras = await getCameras();
+    const cameras = await getRegisteredCameras();
     const number = cameras.reduce((highest, item) => {
       const savedNumber = Number(item.number);
       const idNumber = Number(String(item.id).match(/^camara(\d+)$/)?.[1]);
@@ -49,15 +49,19 @@ export async function POST({ request }) {
     }, 0) + 1;
     const id = `camara${number}`;
 
+    const saved = await callInference('/cameras', {
+      method: 'POST',
+      body: { source_id: id, name, stream_path: streamPath }
+    });
     const camera = {
+      ...mapCamera(saved?.camera ?? saved),
       id,
       number,
       name,
       url: `${normalizedUrl}/`,
       streamPath,
-      registeredAt: new Date().toISOString()
+      registeredAt: String(saved?.registered_at ?? saved?.created_at ?? new Date().toISOString())
     };
-    await putCamera(camera);
 
     try {
       const source = await callInference('/sources/start', {
@@ -79,7 +83,7 @@ export async function DELETE({ url }) {
   if (!id) return json({ error: 'Falta el identificador de la cámara.' }, { status: 400 });
 
   try {
-    const camera = await getCamera(id);
+    const camera = await getRegisteredCamera(id);
     if (!camera) return json({ removed: true });
 
     let warning = null;
@@ -92,7 +96,7 @@ export async function DELETE({ url }) {
       warning = 'El registro se eliminó, pero no fue posible confirmar la detención de la inferencia.';
     }
 
-    await removeCamera(id);
+    await callInference(`/cameras/${encodeURIComponent(id)}`, { method: 'DELETE' });
     return json({ removed: true, inferenceStopped: warning === null, warning });
   } catch (error) {
     console.error('[SentriX] Error al eliminar cámara:', error);
