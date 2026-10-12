@@ -8,6 +8,21 @@ $pythonPath = Join-Path $projectRoot '.venv/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $pythonPath)) {
     throw 'Falta .venv en la raiz del repo. Ejecutar: python -m venv .venv; .\.venv\Scripts\python.exe -m pip install -r backend/requirements-gpu.txt'
 }
+$taskProbeHost = if ($BindHost -in @('0.0.0.0', '::')) { '127.0.0.1' } else { $BindHost }
+if ($taskProbeHost.Contains(':')) { $taskProbeHost = "[$taskProbeHost]" }
+$taskHealthUrl = "http://${taskProbeHost}:8000/health"
+$taskExistingHealth = $null
+try {
+    $taskExistingHealth = Invoke-RestMethod -Uri $taskHealthUrl -TimeoutSec 3
+} catch {
+    # Si no responde, continuar con el arranque normal.
+}
+if ($taskExistingHealth.status -eq 'ok' -and $taskExistingHealth.model_loaded -eq $true -and $taskExistingHealth.gpu_active -eq $true -and $taskExistingHealth.video_transport -eq 'rtsp') {
+    Write-Host "El backend ya esta encendido y la GPU esta activa: $taskHealthUrl"
+    Write-Host 'No se inicia otra instancia. Para aplicar cambios, reinicia la instancia existente.'
+    $global:LASTEXITCODE = 0
+    return
+}
 $env:SENTRIX_PREDICTOR = 'videomae'
 $env:SENTRIX_PROVIDER = 'cuda'
 $env:SENTRIX_VIDEO_TRANSPORT = 'rtsp'

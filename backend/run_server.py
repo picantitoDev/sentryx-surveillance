@@ -1,5 +1,6 @@
 """Un proceso GPU, con acceso por Tailscale y loopback para el proxy HTTPS."""
 import argparse
+import errno
 import socket
 
 import uvicorn
@@ -27,6 +28,10 @@ def main():
             listener.listen(socket.SOMAXCONN)
             listener.setblocking(False)
         uvicorn.Server(uvicorn.Config("app.main:app", workers=1, port=args.port)).run(sockets=sockets)
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE or getattr(error, "winerror", None) == 10048:
+            raise SystemExit(f"El puerto {args.port} ya esta ocupado. Comprueba si el backend ya esta encendido antes de iniciar otra instancia.") from None
+        raise
     finally:
         for listener in sockets:
             listener.close()
