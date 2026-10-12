@@ -13,5 +13,10 @@ $env:SENTRIX_PROVIDER = 'cuda'
 $env:SENTRIX_VIDEO_TRANSPORT = 'rtsp'
 & $pythonPath (Join-Path $PSScriptRoot 'setup_postgres.py') --ensure-running
 if ($LASTEXITCODE -ne 0) { throw 'No se pudo iniciar o encontrar PostgreSQL; revisar el mensaje anterior.' }
-& $pythonPath -m uvicorn app.main:app --app-dir $PSScriptRoot --host $BindHost --port 8000 --workers 1
+Push-Location $PSScriptRoot
+try {
+    & $pythonPath (Join-Path $PSScriptRoot 'run_server.py') --host $BindHost --port 8000 --also-loopback
+} finally {
+    Pop-Location
+}
 if ($LASTEXITCODE -ne 0) { throw "El backend finalizo con codigo $LASTEXITCODE" }
