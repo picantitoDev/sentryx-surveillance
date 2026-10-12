@@ -132,9 +132,8 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
     async def lifespan(app):
         if database_url:
             # Fallar al iniciar si la conexión principal no está disponible.
-            from app.users import UserStore
             def initialize_storage():
-                for persistent_store in (store, alert_store, log_store, UserStore(store.path)):
+                for persistent_store in (store, alert_store, log_store):
                     connection = persistent_store.connect()
                     try:
                         with connection:
@@ -179,8 +178,6 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
     app.add_middleware(CORSMiddleware, allow_origins=origins,
                        allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"],
                        expose_headers=["X-Detection-ID"])
-    from app.users import users_router
-    app.include_router(users_router(store.path))
     app.include_router(receiver.router)
     app.include_router(logs_router(log_store))
     app.include_router(alerts_router(alert_store))

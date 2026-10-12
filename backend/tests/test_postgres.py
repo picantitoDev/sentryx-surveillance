@@ -15,7 +15,6 @@ def test_postgres_stores_and_http(monkeypatch):
     from app.detections import DetectionStore
     from app.alerts import AlertStore, EventPolicy
     from app.inference_logs import InferenceLogStore
-    from app.users import UserStore
     from app.main import create_app
     schema = "test_" + uuid4().hex
     with psycopg.connect(url, autocommit=True) as admin:
@@ -25,7 +24,6 @@ def test_postgres_stores_and_http(monkeypatch):
             detection = DetectionStore(isolated)
             alerts = AlertStore(isolated)
             logs = InferenceLogStore(isolated)
-            users = UserStore(isolated)
             prediction = dict(clase="Hurto", confianza=.75, timestamp=1.25, simulated=False)
             record = detection.save(prediction, "camera", session_id="session")
             assert DetectionStore(isolated).get(record["id"]) == record
@@ -39,12 +37,11 @@ def test_postgres_stores_and_http(monkeypatch):
             log = logs.write("inference_completed", "prueba", detection_id=record["id"])
             assert logs.get(log["id"])["message"] == "prueba"
             assert logs.list()["total"] == 1
-            password = "segura-para-prueba-123"
-            users.create("Operador", password)
             monkeypatch.setenv("SENTRIX_DATABASE_URL", isolated)
             with TestClient(create_app(mode="mock", transport="webrtc")) as client:
-                assert client.post("/auth/verify", json={"username": "operador", "password": password}).json() == {"username": "operador"}
-                assert client.post("/auth/verify", json={"username": "operador", "password": "incorrecta-larga-123"}).status_code == 401
+                assert "/auth/verify" not in client.get("/openapi.json").json()["paths"]
+                with psycopg.connect(isolated) as check:
+                    assert check.execute("SELECT to_regclass('users')").fetchone()[0] is None
                 result = client.post("/predict", json={"timestamp": 0, "frames": [[[[0, 0, 0]]]]})
                 assert result.status_code == 200
                 assert client.get("/detections/" + result.headers["X-Detection-ID"]).status_code == 200

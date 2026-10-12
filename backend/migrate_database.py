@@ -7,14 +7,13 @@ from dotenv import load_dotenv
 from app.detections import DetectionStore
 from app.alerts import AlertStore
 from app.inference_logs import InferenceLogStore
-from app.users import UserStore
 from app.database import connect
 
 ROOT = Path(__file__).resolve().parent
 
 
 def migrate(url, detections, logs):
-    for store in (DetectionStore(url), AlertStore(url), InferenceLogStore(url), UserStore(url)):
+    for store in (DetectionStore(url), AlertStore(url), InferenceLogStore(url)):
         connection = store.connect()
         with connection:
             pass
