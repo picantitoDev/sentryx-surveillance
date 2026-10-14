@@ -4,7 +4,7 @@
   type ViewId = 'overview' | 'monitor' | 'cameras' | 'detections' | 'alerts' | 'service';
   type LogLevel = 'all' | 'INFO' | 'WARNING' | 'ERROR' | 'DEBUG' | 'CRITICAL';
   interface Camera { id: string; number?: number; name: string; url: string; streamPath?: string; registeredAt: string; }
-  interface Detection { id?: string; fecha_hora?: string; created_at?: string; clase?: string; class_name?: string; confianza?: number; processing_ms?: number; status?: string; }
+  interface Detection { id?: string; camera?: string; fecha_hora?: string; created_at?: string; clase?: string; class_name?: string; confianza?: number; processing_ms?: number; status?: string; }
   interface Alert extends Detection { status?: string; }
   interface LatestResult { processing_ms?: number; }
   interface InferenceSource { status?: string; frames_received?: number; windows_processed?: number; last_frame_age_seconds?: number | null; latest_result?: LatestResult; }
@@ -16,7 +16,7 @@
   interface ServiceLogsResponse { logs?: ServiceLog[]; total?: number; }
   interface ErrorPayload { error?: string; }
 
-  const DEFAULT_URL = 'http://15.229.111.228:8889/camera01/';
+  const DEFAULT_URL = '';
   const menu: Array<{ id: ViewId; label: string; icon: string }> = [
     { id: 'overview', label: 'Resumen general', icon: '▦' },
     { id: 'monitor', label: 'Monitoreo en vivo', icon: '▣' },
@@ -30,6 +30,7 @@
   let cameras = $state<Camera[]>([]);
   let selectedId = $state('');
   let inference = $state<InferenceResponse | null>(null);
+  let inferenceByCamera = $state<Record<string, InferenceResponse>>({});
   let loading = $state(true);
   let busy = $state(false);
   let error = $state('');
@@ -63,12 +64,19 @@
   let aiConnected = $derived(inference?.available === true);
   let aiReceiving = $derived(aiConnected && ['receiving', 'running'].includes(source?.status ?? ''));
   let sourceAvailable = $derived(aiReceiving && (source?.last_frame_age_seconds == null || Number(source.last_frame_age_seconds) <= 10));
-  let filteredDetections = $derived(detections.filter((d) => {
+  let filteredDetections = $derived(Object.entries(inferenceByCamera).flatMap(([cameraId, result]) => {
+    const items = result.detections?.length ? result.detections : result.latestDetection ? [result.latestDetection] : [];
+    return items.map((item) => ({ ...item, camera: item.camera ?? cameraId }));
+  }).filter((d) => {
     const cls = (d.clase ?? d.class_name ?? '').toLowerCase();
     const date = d.fecha_hora ?? d.created_at ?? '';
     return (actionFilter === 'all' || cls === actionFilter) &&
       (!since || date.slice(0, 10) >= since) && (!until || date.slice(0, 10) <= until) &&
       (!query || cls.includes(query.toLowerCase()));
+  }).sort((left, right) => {
+    const leftTime = new Date(left.fecha_hora ?? left.created_at ?? 0).getTime();
+    const rightTime = new Date(right.fecha_hora ?? right.created_at ?? 0).getTime();
+    return rightTime - leftTime;
   }));
   let detectionPageCount = $derived(Math.max(1, Math.ceil(filteredDetections.length / DETECTION_PAGE_SIZE)));
   let currentDetectionPage = $derived(Math.min(detectionPage, detectionPageCount));
@@ -89,14 +97,36 @@
   let minimumProcessingMs = $derived(processingTimes.length ? Math.min(...processingTimes) : null);
   let maximumProcessingMs = $derived(processingTimes.length ? Math.max(...processingTimes) : null);
   let latestProcessingMs = $derived(source?.latest_result?.processing_ms ?? latest?.processing_ms ?? null);
+  let activeCameraCount = $derived(cameras.filter((item) => {
+    const result = inferenceByCamera[item.id];
+    return result?.available === true && ['receiving', 'running'].includes(result.source?.status ?? '');
+  }).length);
+  let activeTransmissionCount = $derived(cameras.filter((item) => {
+    const result = inferenceByCamera[item.id];
+    const itemSource = result?.source;
+    return result?.available === true && ['receiving', 'running'].includes(itemSource?.status ?? '') &&
+      (itemSource?.last_frame_age_seconds == null || Number(itemSource.last_frame_age_seconds) <= 10);
+  }).length);
+  let overviewDetections = $derived(Object.entries(inferenceByCamera).flatMap(([cameraId, result]) => {
+    const items = result.detections?.length ? result.detections : result.latestDetection ? [result.latestDetection] : [];
+    return items.map((item) => ({ ...item, camera: item.camera ?? cameraId }));
+  }));
+  let overviewAlerts = $derived(Object.entries(inferenceByCamera).flatMap(([cameraId, result]) =>
+    (result.alerts ?? []).map((item) => ({ ...item, camera: item.camera ?? cameraId }))
+  ));
+  let recentOverviewDetections = $derived([...overviewDetections].sort((left, right) => {
+    const leftTime = new Date(left.fecha_hora ?? left.created_at ?? 0).getTime();
+    const rightTime = new Date(right.fecha_hora ?? right.created_at ?? 0).getTime();
+    return rightTime - leftTime;
+  }).slice(0, 3));
   let todayKey = $derived(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date()));
-  let todayDetections = $derived(detections.filter((d) => {
+  let todayDetections = $derived(overviewDetections.filter((d) => {
     const value = d.fecha_hora ?? d.created_at;
     if (!value) return false;
     const date = new Date(value);
     return !Number.isNaN(date.getTime()) && new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(date) === todayKey;
   }));
-  let activeAlerts = $derived(alerts.filter((alert) => !['closed', 'resolved', 'dismissed'].includes(String(alert.status ?? '').toLowerCase())));
+  let activeAlerts = $derived(overviewAlerts.filter((alert) => !['closed', 'resolved', 'dismissed'].includes(String(alert.status ?? '').toLowerCase())));
 
   function errorMessage(value: unknown): string { return value instanceof Error ? value.message : String(value); }
   async function getJSON<T>(path: string, options?: RequestInit): Promise<T> {
@@ -113,10 +143,22 @@
     catch (e) { error = errorMessage(e); }
     finally { loading = false; }
   }
-  async function refreshInference() {
-    if (!camera) { inference = null; return; }
-    try { inference = await getJSON<InferenceResponse>(`/api/inference?id=${encodeURIComponent(camera.id)}`); }
-    catch (e) { inference = { available: false, error: errorMessage(e), source: null, alerts: [], detections: [] }; }
+  async function fetchCameraInference(cameraId: string): Promise<InferenceResponse> {
+    try { return await getJSON<InferenceResponse>(`/api/inference?id=${encodeURIComponent(cameraId)}`); }
+    catch (e) { return { available: false, error: errorMessage(e), source: null, alerts: [], detections: [] }; }
+  }
+  async function refreshInference(cameraId = camera?.id) {
+    if (!cameraId) { inference = null; return; }
+    const result = await fetchCameraInference(cameraId);
+    inferenceByCamera = { ...inferenceByCamera, [cameraId]: result };
+    if (cameraId === selectedId) inference = result;
+    lastRefresh = new Date();
+  }
+  async function refreshAllInference() {
+    if (!cameras.length) { inferenceByCamera = {}; inference = null; return; }
+    const entries = await Promise.all(cameras.map(async (item) => [item.id, await fetchCameraInference(item.id)] as const));
+    inferenceByCamera = Object.fromEntries(entries);
+    inference = selectedId ? inferenceByCamera[selectedId] ?? null : null;
     lastRefresh = new Date();
   }
   async function refreshServiceLogs() {
@@ -142,13 +184,13 @@
     if (params.get('modal') === 'camera') modal = true;
     loadCamera().then(() => {
       if (!mounted) return;
-      refreshInference();
+      refreshAllInference();
       if (view === 'service') refreshServiceLogs();
     });
     const timer = setInterval(async () => {
-      if (!mounted || !camera || fetching) return;
+      if (!mounted || !cameras.length || fetching) return;
       fetching = true;
-      try { await refreshInference(); } finally { fetching = false; }
+      try { await refreshAllInference(); } finally { fetching = false; }
     }, 3000);
     return () => { mounted = false; clearInterval(timer); };
   });
@@ -156,6 +198,8 @@
   async function registerCamera(event: SubmitEvent) {
     event.preventDefault(); clearFeedback(); busy = true;
     try {
+      const parsedUrl = new URL(url.trim());
+      if (parsedUrl.protocol !== 'https:') throw new Error('La dirección de la cámara debe utilizar HTTPS. Ejemplo: https://servidor/camera01/');
       const data = await getJSON<RegisterCameraResponse>('/api/camera', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url })
       });
@@ -165,7 +209,7 @@
       if (data.inference?.error) error = data.inference.error;
       modal = false; view = 'cameras'; showPlayer = true;
       name = ''; url = '';
-      await refreshInference();
+      await refreshInference(data.camera.id);
     } catch (e) { error = errorMessage(e); }
     finally { busy = false; }
   }
@@ -176,7 +220,7 @@
     try {
       await getJSON<unknown>('/api/camera/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: target.id }) });
       notice = 'Solicitud enviada al servidor de inferencia.';
-      await refreshInference();
+      await refreshInference(target.id);
     } catch (e) { error = errorMessage(e); }
     finally { busy = false; }
   }
@@ -187,10 +231,14 @@
       const result = await getJSON<DeleteCameraResponse>(`/api/camera?id=${encodeURIComponent(target.id)}`, { method: 'DELETE' });
       cameras = cameras.filter((item) => item.id !== target.id);
       selectedId = cameras[0]?.id ?? '';
-      inference = null; showPlayer = cameras.length > 0;
+      const remainingInference = { ...inferenceByCamera };
+      delete remainingInference[target.id];
+      inferenceByCamera = remainingInference;
+      inference = selectedId ? remainingInference[selectedId] ?? null : null;
+      showPlayer = cameras.length > 0;
       notice = result.warning ?? 'Se eliminó la cámara y se solicitó detener la inferencia.';
       view = 'cameras';
-      if (camera) await refreshInference();
+      if (selectedId) await refreshInference(selectedId);
     } catch (e) { error = errorMessage(e); }
     finally { busy = false; }
   }
@@ -214,11 +262,21 @@
   function cameraLabel(value: Camera | null | undefined) {
     return value?.number ? `Cámara ${value.number}` : value?.id ?? '—';
   }
+  function latestFor(cameraId: string): Detection | null {
+    const result = inferenceByCamera[cameraId];
+    return result?.latestDetection ?? result?.detections?.[0] ?? null;
+  }
+  function cameraIsOnline(cameraId: string): boolean {
+    const result = inferenceByCamera[cameraId];
+    const itemSource = result?.source;
+    return result?.available === true && ['receiving', 'running'].includes(itemSource?.status ?? '') &&
+      (itemSource?.last_frame_age_seconds == null || Number(itemSource.last_frame_age_seconds) <= 10);
+  }
   function go(id: ViewId) { view = id; clearFeedback(); if (id === 'monitor') monitorExpanded = false; if (id === 'service') refreshServiceLogs(); }
   function showRegistration() { clearFeedback(); name = ''; url = ''; modal = true; }
   async function selectCamera(target: Camera, destination: ViewId = 'monitor') {
-    selectedId = target.id; inference = null; view = destination; showPlayer = true; monitorExpanded = destination === 'monitor';
-    await refreshInference();
+    selectedId = target.id; inference = inferenceByCamera[target.id] ?? null; view = destination; showPlayer = true; monitorExpanded = destination === 'monitor';
+    await refreshInference(target.id);
   }
   async function expandCamera(target: Camera) {
     await selectCamera(target, 'monitor');
@@ -268,7 +326,7 @@
         {:else if view === 'monitor'}
           {#if monitorExpanded}<button class="btn secondary" onclick={() => monitorExpanded = false}>← Ver todas las cámaras</button>
           {:else}<span class="demo-badge">Vista simultánea</span>{/if}
-        {:else}<button class="btn secondary" onclick={refreshInference} disabled={!camera}>↻ Actualizar</button>{/if}
+        {:else}<button class="btn secondary" onclick={() => refreshAllInference()} disabled={!cameras.length}>↻ Actualizar</button>{/if}
       </div>
 
       {#if error}<div class="banner error" role="alert"><strong>Atención</strong><span>{error}</span><button aria-label="Cerrar aviso" onclick={() => error = ''}>×</button></div>{/if}
@@ -276,8 +334,8 @@
 
       {#if view === 'overview'}
         <div class="overview-stats">
-          <button class="overview-stat" onclick={() => go('cameras')}><span>Cámaras activas</span><div><strong>{aiReceiving ? 1 : 0}</strong><i>↗</i></div></button>
-          <button class="overview-stat" onclick={() => go('monitor')}><span>Transmisiones activas</span><div><strong>{sourceAvailable ? 1 : 0}</strong><i>↗</i></div></button>
+          <button class="overview-stat" onclick={() => go('cameras')}><span>Cámaras activas</span><div><strong>{activeCameraCount}</strong><i>↗</i></div></button>
+          <button class="overview-stat" onclick={() => go('monitor')}><span>Transmisiones activas</span><div><strong>{activeTransmissionCount}</strong><i>↗</i></div></button>
           <button class="overview-stat" onclick={() => go('detections')}><span>Detecciones de hoy</span><div><strong>{todayDetections.length}</strong><i>↗</i></div></button>
           <button class="overview-stat alert-card" onclick={() => go('alerts')}><span>Alertas activas</span><div><strong>{activeAlerts.length}</strong><i>!</i></div></button>
         </div>
@@ -286,8 +344,8 @@
           <div class="overview-section-head"><h2>Actividad reciente</h2><button class="btn secondary" onclick={() => go('detections')}>Ver detecciones →</button></div>
           <div class="table-scroll"><table class="overview-table"><thead><tr><th>Hora</th><th>Cámara</th><th>Acción estimada</th><th>Puntuación</th></tr></thead>
             <tbody>
-              {#each detections.slice(0, 3) as detection, index (detection.id ?? `${detection.fecha_hora}-${index}`)}
-                <tr><td>{fmtTime(detection.fecha_hora ?? detection.created_at)}</td><td>{cameraLabel(camera)}</td><td>{labelClass(detection.clase ?? detection.class_name)}</td><td>{confidence(detection.confianza)}</td></tr>
+              {#each recentOverviewDetections as detection, index (detection.id ?? `${detection.fecha_hora}-${index}`)}
+                <tr><td>{fmtTime(detection.fecha_hora ?? detection.created_at)}</td><td>{detection.camera ?? '—'}</td><td>{labelClass(detection.clase ?? detection.class_name)}</td><td>{confidence(detection.confianza)}</td></tr>
               {:else}
                 <tr><td colspan="4" class="overview-empty">No hay actividad reciente registrada.</td></tr>
               {/each}
@@ -331,13 +389,13 @@
           <div class="camera-wall">
             {#each cameras as item (item.id)}
               <section class="surface camera-tile">
-                <div class="camera-tile-head"><h2>{cameraLabel(item)}</h2><span class:positive={item.id === camera?.id && sourceAvailable} class="pill">{item.id === camera?.id && sourceAvailable ? 'En línea' : 'Registrada'}</span></div>
+                <div class="camera-tile-head"><h2>{cameraLabel(item)}</h2><span class:positive={cameraIsOnline(item.id)} class="pill">{cameraIsOnline(item.id) ? 'En línea' : inferenceByCamera[item.id]?.available ? 'Conectada' : 'No disponible'}</span></div>
                 <div class="tile-stream">
                   <iframe src={item.url} title={`Video de ${item.name}`} allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
                   <span class="source-mark">SOURCE&nbsp;&nbsp;/&nbsp;&nbsp;CCTV</span>
                 </div>
                 <div class="camera-tile-foot">
-                  <span class="tile-detection">{item.id === camera?.id && latest ? `${labelClass(latest.clase)} · ${confidence(latest.confianza)}` : 'Sin detección reciente'}</span>
+                  <span class="tile-detection">{latestFor(item.id) ? `${labelClass(latestFor(item.id)?.clase ?? latestFor(item.id)?.class_name)} · ${confidence(latestFor(item.id)?.confianza)}` : 'Esperando predicción'}</span>
                   <button class="btn secondary" onclick={() => expandCamera(item)}>Ampliar</button>
                 </div>
               </section>
@@ -355,7 +413,7 @@
             </section>
             <div class="monitor-aside">
               <section class="surface"><div class="section-title"><div><h2>Inteligencia artificial</h2><p>Estado de FastAPI</p></div><span class:positive={aiReceiving} class="pill">{aiReceiving ? 'Analizando' : aiConnected ? 'Conectada' : 'No disponible'}</span></div>
-                <div class="metric-list" aria-live="polite"><div class="state-row"><span>Estado de la fuente</span><strong class="status-value" class:status-ok={sourceAvailable} class:status-off={!sourceAvailable}>{sourceAvailable ? 'Activa' : 'No disponible'}</strong></div><div class="state-row"><span>Estado del servicio de inferencia</span><strong class="status-value" class:status-ok={aiConnected} class:status-off={!aiConnected}>{aiConnected ? 'Disponible' : 'No disponible'}</strong></div><div><span>Estado técnico del receptor</span><strong>{source?.status ?? '—'}</strong></div><div><span>Fotogramas recibidos</span><strong>{source?.frames_received ?? '—'}</strong></div><div><span>Ventanas procesadas</span><strong>{source?.windows_processed ?? '—'}</strong></div><div><span>Último procesamiento</span><strong>{latestProcessingMs == null ? '—' : `${Number(latestProcessingMs).toFixed(2)} ms`}</strong></div><div><span>Último fotograma</span><strong>{source?.last_frame_age_seconds == null ? '—' : `${source.last_frame_age_seconds} s`}</strong></div></div>
+                <div class="metric-list" aria-live="polite"><div><span>Estado técnico del receptor</span><strong>{source?.status ?? '—'}</strong></div><div><span>Fotogramas recibidos</span><strong>{source?.frames_received ?? '—'}</strong></div><div><span>Ventanas procesadas</span><strong>{source?.windows_processed ?? '—'}</strong></div><div><span>Último procesamiento</span><strong>{latestProcessingMs == null ? '—' : `${Number(latestProcessingMs).toFixed(2)} ms`}</strong></div><div><span>Último fotograma</span><strong>{source?.last_frame_age_seconds == null ? '—' : `${source.last_frame_age_seconds} s`}</strong></div></div>
                 <button class="btn secondary full" onclick={() => activateInference()} disabled={busy}>{busy ? 'Solicitando...' : 'Activar / reintentar IA'}</button>
               </section>
               <section class="surface"><div class="section-title"><div><h2>Predicción reciente</h2><p>Resultado de la última ventana</p></div></div>
@@ -371,7 +429,7 @@
           <div class="section-title"><div><h2>Historial de detecciones</h2><p>Resultados disponibles a través de FastAPI</p></div><span class="pill neutral">{filteredDetections.length} resultados</span></div>
           <div class="filters"><label>Buscar acción<input placeholder="Buscar clasificación" bind:value={query} oninput={() => detectionPage = 1}/></label><label>Acción estimada<select bind:value={actionFilter} onchange={() => detectionPage = 1}><option value="all">Todas las acciones</option><option value="normal">Normal</option><option value="hurto">Hurto</option><option value="robo">Robo</option><option value="agresion_fisica">Agresión física</option><option value="vandalismo">Vandalismo</option></select></label><label>Desde<input type="date" bind:value={since} onchange={() => detectionPage = 1}/></label><label>Hasta<input type="date" bind:value={until} onchange={() => detectionPage = 1}/></label></div>
           <div class="table-scroll"><table><thead><tr><th>Fecha y hora</th><th>Cámara</th><th>Acción estimada</th><th>Confianza</th></tr></thead><tbody>
-            {#each paginatedDetections as detection, i (detection.id ?? `${detection.fecha_hora}-${i}`)}<tr><td>{fmtDate(detection.fecha_hora)}</td><td>{camera?.id ?? '—'}</td><td><strong>{labelClass(detection.clase)}</strong></td><td>{confidence(detection.confianza)}</td></tr>
+            {#each paginatedDetections as detection, i (detection.id ?? `${detection.camera}-${detection.fecha_hora}-${i}`)}<tr><td>{fmtDate(detection.fecha_hora)}</td><td>{detection.camera ?? '—'}</td><td><strong>{labelClass(detection.clase)}</strong></td><td>{confidence(detection.confianza)}</td></tr>
             {:else}<tr><td colspan="4" class="table-empty">{aiConnected ? 'No hay detecciones para los filtros seleccionados.' : 'Sin registros disponibles. Verifica la conexión con FastAPI.'}</td></tr>{/each}
           </tbody></table></div>
           {#if filteredDetections.length > 0}
@@ -380,7 +438,7 @@
               <div><button class="text-btn" onclick={() => detectionPage = Math.max(1, currentDetectionPage - 1)} disabled={currentDetectionPage === 1}>← Anterior</button><strong>Página {currentDetectionPage} de {detectionPageCount}</strong><button class="text-btn" onclick={() => detectionPage = Math.min(detectionPageCount, currentDetectionPage + 1)} disabled={currentDetectionPage === detectionPageCount}>Siguiente →</button></div>
             </div>
           {/if}
-          <p class="footnote">Se muestran las detecciones recientes proporcionadas por la API; el historial completo requiere paginación y almacenamiento del servicio.</p>
+          <p class="footnote">Las detecciones de todas las cámaras se organizan en páginas de {DETECTION_PAGE_SIZE} registros.</p>
         </section>
 
       {:else if view === 'alerts'}
@@ -423,7 +481,8 @@
       <div class="dialog-top"><div><div class="eyebrow">CONFIGURACIÓN DE FUENTE</div><h2 id="modal-title">Registrar cámara</h2><p>Vincula una transmisión existente de MediaMTX.</p></div><button class="close" aria-label="Cerrar" onclick={() => modal = false}>×</button></div>
       <form onsubmit={registerCamera}>
         <label for="name">Nombre de la cámara <span>*</span></label><input id="name" required maxlength="100" bind:value={name} placeholder="Ej. Cámara de entrada" />
-        <label for="url">Dirección WebRTC <span>*</span></label><input id="url" type="url" required bind:value={url} placeholder="http://IP:8889/camera01/" />
+        <label for="url">Dirección WebRTC segura <span>*</span></label><input id="url" type="url" required pattern="https://.*" title="La dirección debe comenzar con https://" bind:value={url} placeholder="https://servidor/camera01/" />
+        <p class="form-help">Por seguridad, solo se permiten direcciones que comiencen con <strong>https://</strong>.</p>
         <div class="info-note"><strong>Transmisión existente</strong><p>La cámara debe estar publicando antes de registrarla. Si la ruta ya está registrada, SentriX asignará automáticamente un identificador diferente al nuevo registro.</p></div>
         <div class="modal-actions"><button type="button" class="btn secondary" onclick={() => modal = false}>Cancelar</button><button type="submit" class="btn primary" disabled={busy}>{busy ? 'Registrando...' : 'Registrar y activar IA'}</button></div>
       </form>
@@ -471,7 +530,7 @@
   .filters{display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:13px;margin-bottom:22px}.filters label{display:flex;flex-direction:column;gap:9px;color:#415d78;font-size:11px;font-weight:700}.filters input,.filters select,.dialog input{width:100%;min-width:0;padding:11px 12px;border:1px solid #d7e1ec;border-radius:6px;background:#fff;color:#23415e;font-size:12px;outline:none}.filters input:focus,.filters select:focus,.dialog input:focus{border-color:#377ab4;box-shadow:0 0 0 3px #9bd5ff3d}.footnote{font-size:11px;color:#8b9aac;line-height:1.6;margin:18px 0 0}.event-list{display:flex;flex-direction:column}.event{display:flex;align-items:center;gap:15px;padding:17px 0;border-bottom:1px solid #ecf1f6}.event-symbol{background:#fff0eb;color:#b85a43;font-weight:800;width:36px;height:36px;display:grid;place-items:center;border-radius:7px}.event div{flex:1}.event strong{color:#2e4862;font-size:13px;text-transform:capitalize}.event p{color:#8194a7;font-size:11px;margin:5px 0}
   .banner{display:flex;align-items:center;gap:12px;padding:13px 16px;margin-bottom:21px;border:1px solid #eed9ce;border-radius:7px;font-size:12px;background:#fff7f2;color:#8c5038;overflow-wrap:anywhere}.banner strong{flex-shrink:0}.banner span{flex:1}.banner button{border:0;background:transparent;font-size:21px;color:inherit;margin-left:auto}.banner.success{border-color:#cbe9d9;background:#f1fbf6;color:#2e7255}
   footer{padding:19px 48px;background:#fff;border-top:1px solid #e6edf4;color:#95a4b4;font-size:10px}footer span{margin:0 7px}.footer-right{float:right}
-  .modal-overlay{position:fixed;inset:0;background:#0b1c32a8;display:flex;justify-content:center;align-items:center;padding:18px;z-index:50}.dialog{background:white;width:100%;max-width:530px;border-radius:12px;padding:28px;box-shadow:0 25px 85px #07182f55;max-height:95vh;overflow:auto}.dialog-top{display:flex;justify-content:space-between;gap:15px}.dialog h2{font-size:24px;margin:8px 0}.dialog p{color:#8396aa;font-size:12px;margin:0 0 25px}.close{align-self:start;background:none;border:0;color:#8193a5;font-size:28px}.dialog form{display:flex;flex-direction:column;gap:9px}.dialog label{font-size:12px;color:#294760;font-weight:700;margin-top:10px}.dialog label span{color:#c34e56}.dialog input{font-size:13px;padding:12px}.info-note{background:#eff6fe;border:1px solid #d9e8f7;border-radius:7px;padding:15px;margin-top:14px}.info-note strong{font-size:12px;color:#265c90}.info-note p{margin:6px 0 0;line-height:1.6;color:#527394}.modal-actions{display:flex;justify-content:end;gap:9px;margin-top:19px}
+  .modal-overlay{position:fixed;inset:0;background:#0b1c32a8;display:flex;justify-content:center;align-items:center;padding:18px;z-index:50}.dialog{background:white;width:100%;max-width:530px;border-radius:12px;padding:28px;box-shadow:0 25px 85px #07182f55;max-height:95vh;overflow:auto}.dialog-top{display:flex;justify-content:space-between;gap:15px}.dialog h2{font-size:24px;margin:8px 0}.dialog p{color:#8396aa;font-size:12px;margin:0 0 25px}.close{align-self:start;background:none;border:0;color:#8193a5;font-size:28px}.dialog form{display:flex;flex-direction:column;gap:9px}.dialog label{font-size:12px;color:#294760;font-weight:700;margin-top:10px}.dialog label span{color:#c34e56}.dialog input{font-size:13px;padding:12px}.dialog .form-help{margin:0;color:#657f99;font-size:11px;line-height:1.5}.info-note{background:#eff6fe;border:1px solid #d9e8f7;border-radius:7px;padding:15px;margin-top:14px}.info-note strong{font-size:12px;color:#265c90}.info-note p{margin:6px 0 0;line-height:1.6;color:#527394}.modal-actions{display:flex;justify-content:end;gap:9px;margin-top:19px}
   @media(max-width:1200px){main{padding:35px 26px 55px}.topbar{padding:0 26px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.monitor-grid{grid-template-columns:1fr}.monitor-aside{display:grid;grid-template-columns:1fr 1fr}.filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
   @media(max-width:1050px){.sidebar{width:72px}.brand{padding:20px 14px;justify-content:center}.brand>span:nth-child(2),.menu-label,.nav-icon+span,.side-bottom{display:none}nav{padding:20px 8px}nav button{justify-content:center;padding:13px 9px}.nav-icon{font-size:21px}.topbar{height:64px}.operator,.server-label{display:none}}
   @media(max-width:580px){.sidebar{width:58px}.brand{padding:14px 7px}.page-head{align-items:start;flex-direction:column}.page-head h1{font-size:25px}.stats{grid-template-columns:1fr 1fr}.stat{padding:16px;min-height:125px}.stat strong{font-size:27px}.stat .stat-word{font-size:15px}.monitor-aside{grid-template-columns:1fr}.filters{grid-template-columns:1fr}.stream-footer{flex-direction:column;align-items:start}main{padding:25px 13px}.surface{padding:17px}.topbar{padding:0 13px}.breadcrumb{font-size:8px}footer{padding:14px}.footer-right{display:none}.dialog{padding:20px}}
@@ -504,7 +563,6 @@
   .log-filters{display:grid;grid-template-columns:2fr 1fr 1fr;gap:13px;padding:0 25px 18px}.log-filters label{display:flex;flex-direction:column;gap:7px;color:#415d78;font-size:11px;font-weight:700}.log-filters input,.log-filters select{width:100%;min-width:0;padding:9px 11px;border:1px solid #ccdaea;border-radius:6px;background:#fff;color:#173b61;font-size:12px;outline:none}.log-filters input:focus,.log-filters select:focus{border-color:var(--sx-blue);box-shadow:0 0 0 3px #12d7f224}.logs-error{margin:0 25px 20px}.logs-table{min-width:1050px}.logs-table th{padding-top:12px;padding-bottom:12px}.logs-table td{padding-top:12px;padding-bottom:12px}.log-level{display:inline-flex;padding:4px 7px;border-radius:5px;background:#e8f5ef;color:#267454;font-size:10px;font-weight:800}.log-level.warning-level{background:#fff3df;color:#a55e13}.log-level.error-level{background:#fff0f1;color:#bd3f4b}.log-message{min-width:240px;max-width:430px;white-space:normal;line-height:1.4}.log-message small{margin-top:3px}.logs-note{padding:0 25px 16px}.logs-note code{color:#0758a8;background:#eef6ff;padding:2px 5px;border-radius:4px}
   .log-pagination{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 25px;border-top:1px solid #e7eef6;color:#71869b;font-size:11px}.log-pagination>div{display:flex;align-items:center;gap:12px}.log-pagination strong{color:#3b5875;font-size:11px;white-space:nowrap}.log-pagination .text-btn:disabled{cursor:not-allowed;background:#f5f7fa;color:#a5b1bf}
   .detection-pagination{margin:18px -25px -8px;padding-bottom:10px}
-  .metric-list .state-row{padding:14px 0}.status-value{display:inline-flex;align-items:center;padding:5px 8px;border-radius:5px;font-size:11px}.status-value::before{content:'';width:7px;height:7px;border-radius:50%;margin-right:6px;background:currentColor}.status-value.status-ok{color:#187653;background:#e5f6ef}.status-value.status-off{color:#a64850;background:#fff0f1}
 
   /* Resumen general: presentación inspirada en el tablero operativo. */
   .demo-badge{align-self:flex-start;padding:10px 13px;border:1px solid #d5e1ec;border-radius:6px;background:#eef3f8;color:#506d89;font-size:12px}
