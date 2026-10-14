@@ -35,7 +35,7 @@ export async function GET({ url }) {
   try {
     const [source, detections, alertsPage] = await Promise.all([
       callInference(`/sources/${encodeURIComponent(camera.id)}/status`),
-      callInference(`/detections?camera=${encodeURIComponent(camera.id)}&limit=10`),
+      callInference(`/detections?camera=${encodeURIComponent(camera.id)}&limit=500&offset=0`),
       callInference(`/alerts?camera=${encodeURIComponent(camera.id)}&limit=30`)
     ]);
     const registeredTime = new Date(camera.registeredAt).getTime();
