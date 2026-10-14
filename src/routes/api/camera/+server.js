@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { callInference } from '#lib/server/inference-api.js';
-import { getRegisteredCamera, getRegisteredCameras, mapCamera } from '#lib/server/camera-registry.js';
+import { getRegisteredCameras, mapCamera } from '#lib/server/camera-registry.js';
 
 /** @param {unknown} value */
 function normalizeUrl(value) {
@@ -11,7 +11,7 @@ function normalizeUrl(value) {
 function cameraIdFromUrl(value) {
   try {
     const parsed = new URL(String(value ?? ''));
-    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    if (parsed.protocol !== 'https:') return '';
     return parsed.pathname.split('/').filter(Boolean).at(-1)?.toLowerCase() ?? '';
   } catch {
     return '';
@@ -37,22 +37,25 @@ export async function POST({ request }) {
     return json({ error: 'El nombre es obligatorio y debe tener como máximo 100 caracteres.' }, { status: 400 });
   }
   if (!normalizedUrl || !streamPath || !/^[a-z0-9_-]{1,64}$/.test(streamPath)) {
-    return json({ error: 'Ingresa una URL HTTP(S) válida cuyo último segmento sea el identificador de la cámara.' }, { status: 400 });
+    return json({ error: 'Ingresa una URL HTTPS válida cuyo último segmento sea el identificador de la cámara.' }, { status: 400 });
   }
 
   try {
-    const cameras = await getRegisteredCameras();
-    const number = cameras.reduce((highest, item) => {
+    const cameras = await getRegisteredCameras({ includeDisabled: true });
+    const activeNumbers = new Set(cameras.filter((item) => item.enabled).map((item) => {
       const savedNumber = Number(item.number);
       const idNumber = Number(String(item.id).match(/^camara(\d+)$/)?.[1]);
-      return Math.max(highest, Number.isInteger(savedNumber) ? savedNumber : 0, Number.isInteger(idNumber) ? idNumber : 0);
-    }, 0) + 1;
+      return Number.isInteger(savedNumber) && savedNumber > 0 ? savedNumber : idNumber;
+    }).filter((value) => Number.isInteger(value) && value > 0));
+    let number = 1;
+    while (activeNumbers.has(number)) number += 1;
     const id = `camara${number}`;
+    const existingDisabledCamera = cameras.find((item) => item.id === id && !item.enabled);
+    const registrationBody = { source_id: id, name, stream_path: streamPath, enabled: true };
 
-    const saved = await callInference('/cameras', {
-      method: 'POST',
-      body: { source_id: id, name, stream_path: streamPath }
-    });
+    const saved = existingDisabledCamera
+      ? await callInference(`/cameras/${encodeURIComponent(id)}`, { method: 'PUT', body: registrationBody })
+      : await callInference('/cameras', { method: 'POST', body: registrationBody });
     const camera = {
       ...mapCamera(saved?.camera ?? saved),
       id,
@@ -83,7 +86,7 @@ export async function DELETE({ url }) {
   if (!id) return json({ error: 'Falta el identificador de la cámara.' }, { status: 400 });
 
   try {
-    const camera = await getRegisteredCamera(id);
+    const camera = await getRegisteredCameras({ includeDisabled: true }).then((items) => items.find((item) => item.id === id) ?? null);
     if (!camera) return json({ removed: true });
 
     let warning = null;
@@ -91,12 +94,23 @@ export async function DELETE({ url }) {
       await callInference(`/sources/${encodeURIComponent(id)}`, { method: 'DELETE' });
     } catch (error) {
       console.error(`[SentriX] No se pudo detener la inferencia para ${id}:`, error);
-      // La inferencia es un servicio externo: una caída o una fuente inexistente
-      // no debe impedir que el operador retire el registro local.
+      // La detención de la fuente no debe impedir eliminar el registro,
+      // incluso cuando se trata de la última cámara del inventario.
       warning = 'El registro se eliminó, pero no fue posible confirmar la detención de la inferencia.';
     }
 
-    await callInference(`/cameras/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    // FastAPI protege su cámara predeterminada con HTTP 409. En ese único caso se
+    // aplica una baja lógica y el registro deja de formar parte del inventario.
+    try {
+      await callInference(`/cameras/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.toLowerCase().includes('predeterminada')) throw error;
+      await callInference(`/cameras/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: { source_id: id, name: camera.name, stream_path: camera.streamPath, enabled: false }
+      });
+    }
     return json({ removed: true, inferenceStopped: warning === null, warning });
   } catch (error) {
     console.error('[SentriX] Error al eliminar cámara:', error);

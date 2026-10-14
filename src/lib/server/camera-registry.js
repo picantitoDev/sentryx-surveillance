@@ -2,7 +2,7 @@ import { CAMERA_PLAYBACK_URL } from '$app/env/private';
 import { callInference } from './inference-api.js';
 
 /**
- * @typedef {{ id: string, number: number, name: string, url: string, streamPath: string, registeredAt: string }} Camera
+ * @typedef {{ id: string, number: number, name: string, url: string, streamPath: string, registeredAt: string, enabled: boolean }} Camera
  */
 
 /** @param {any} payload */
@@ -45,13 +45,15 @@ export function mapCamera(row) {
     name: String(row?.name ?? row?.nombre ?? id),
     url: playbackUrl,
     streamPath,
-    registeredAt: String(row?.registered_at ?? row?.registeredAt ?? row?.created_at ?? row?.fecha_hora ?? '')
+    registeredAt: String(row?.registered_at ?? row?.registeredAt ?? row?.created_at ?? row?.fecha_hora ?? ''),
+    enabled: row?.enabled !== false
   };
 }
 
-export async function getRegisteredCameras() {
+/** @param {{ includeDisabled?: boolean }} [options] */
+export async function getRegisteredCameras({ includeDisabled = false } = {}) {
   const cameras = /** @type {Camera[]} */ (cameraRows(await callInference('/cameras')).map(mapCamera));
-  return cameras.filter((camera) => camera.id);
+  return cameras.filter((camera) => camera.id && (includeDisabled || camera.enabled));
 }
 
 /** @param {unknown} id */
