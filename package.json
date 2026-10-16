@@ -23,7 +23,9 @@
 		"vite": "^8.3.0"
 	},
 	"imports": {
-		"#lib": "./src/lib/index.js",
-		"#lib/*": "./src/lib/*"
+		"#domain/*": "./src/domain/*",
+		"#application/*": "./src/application/*",
+		"#infrastructure/*": "./src/infrastructure/*",
+		"#presentation/*": "./src/presentation/*"
 	}
 }
