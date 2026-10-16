@@ -1,5 +1,6 @@
 import { CAMERA_PLAYBACK_URL } from '$app/env/private';
-import { callInference } from './inference-api.js';
+import { cameraNumberFromId } from '#domain/camera/camera.js';
+import { callInference } from '../inference/fastapi-client.js';
 
 /**
  * @typedef {{ id: string, number: number, name: string, url: string, streamPath: string, registeredAt: string, enabled: boolean }} Camera
@@ -11,12 +12,6 @@ function cameraRows(payload) {
   if (Array.isArray(payload?.cameras)) return payload.cameras;
   if (Array.isArray(payload?.items)) return payload.items;
   return [];
-}
-
-/** @param {unknown} value */
-function numericSuffix(value) {
-  const number = Number(String(value ?? '').match(/(?:camara|camera)(\d+)$/i)?.[1]);
-  return Number.isInteger(number) ? number : 0;
 }
 
 /** @param {any} row @returns {Camera} */
@@ -41,7 +36,7 @@ export function mapCamera(row) {
 
   return {
     id,
-    number: Number(row?.number) || numericSuffix(id),
+    number: Number(row?.number) || cameraNumberFromId(id),
     name: String(row?.name ?? row?.nombre ?? id),
     url: playbackUrl,
     streamPath,
