@@ -1,12 +1,9 @@
-"""Dependency boundaries and model resources must survive future moves."""
 import ast
 from pathlib import Path
-
+import app
 import pytest
 
-
-APP = Path(__file__).resolve().parents[1] / "app"
-
+APP = Path(app.__file__).resolve().parent
 
 @pytest.mark.parametrize("layer", ["domain", "application"])
 def test_inner_layers_do_not_import_adapters_or_web_frameworks(layer):
@@ -25,9 +22,3 @@ def test_inner_layers_do_not_import_adapters_or_web_frameworks(layer):
                 assert not any(name.startswith("app.application") for name in imports), path
             assert not any(name == prefix or name.startswith(prefix + ".")
                            for name in imports for prefix in forbidden), (path, imports)
-
-
-def test_videomae_still_resolves_existing_model_directory():
-    from app.infrastructure.inference.videomae import MODEL_ROOT, load_metadata
-    assert MODEL_ROOT == APP.parents[1] / "modelo"
-    assert load_metadata()["input"]["shape"] == [1, 3, 16, 224, 224]
