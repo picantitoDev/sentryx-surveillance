@@ -1,5 +1,9 @@
 node_modules
 
+# Documentación fuera del repositorio de ejecución
+*.md
+/docs/
+
 # Output
 .output
 .vercel
@@ -12,11 +16,10 @@ node_modules
 .DS_Store
 Thumbs.db
 
-# Env
+# Configuración privada local (incluye entornos de pruebas)
 .env
 .env.*
 !.env.example
-!.env.test
 
 # Vite
 vite.config.js.timestamp-*
@@ -25,6 +28,7 @@ vite.config.ts.timestamp-*
 # Backend Python
 .venv/
 venv/
+env/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -32,13 +36,9 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Configuración privada (incluso entornos de pruebas)
-.env
-.env.*
-!.env.example
-
 # Datos y diagnósticos generados
 /backend/data/
+/data/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
@@ -46,6 +46,24 @@ htmlcov/
 /modelo/gpu_profile_*.json
 /modelo/gpu_validation.json
 
-# Pesos distribuidos aparte, no mediante Git normal
-/modelo/*.onnx
-/modelo/*.onnx.data
+# Respaldos privados y archivos temporales de edicion
+*.backup
+*.bak
+*.orig
+*.tmp
+*~
+
+# Persistencia SQLite (tambien en las pruebas y en las nuevas capas)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.sqlite3-journal
+
+# Pesos distribuidos aparte, en cualquier carpeta
+*.onnx
+*.onnx.data
