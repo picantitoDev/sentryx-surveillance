@@ -4,10 +4,10 @@ import os
 from pathlib import Path
 import sqlite3
 from dotenv import load_dotenv
-from app.detections import DetectionStore
-from app.alerts import AlertStore
-from app.inference_logs import InferenceLogStore
-from app.database import connect
+from app.infrastructure.persistence.detections import DetectionStore
+from app.infrastructure.persistence.alerts import AlertStore
+from app.infrastructure.persistence.inference_logs import InferenceLogStore
+from app.infrastructure.persistence.database import connect
 
 ROOT = Path(__file__).resolve().parent
 
