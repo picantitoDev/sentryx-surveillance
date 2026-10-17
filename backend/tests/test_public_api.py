@@ -4,11 +4,10 @@ import os
 
 import httpx
 
-from test_rtsp import configured
 
 
 def test_public_routes_and_cors(configured):
-    from app.main import create_app
+    from app.bootstrap import create_app
     app = create_app(mode="mock", transport="rtsp")
 
     async def exercise():

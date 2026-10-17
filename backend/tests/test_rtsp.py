@@ -6,24 +6,10 @@ import httpx
 import pytest
 
 
-@pytest.fixture
-def configured(monkeypatch, tmp_path):
-    monkeypatch.setenv("SENTRIX_DATABASE_URL", "")
-    monkeypatch.setenv("SENTRIX_DETECTION_DB", str(tmp_path / "detections.sqlite3"))
-    monkeypatch.setenv("SENTRIX_LOG_DB", str(tmp_path / "logs.sqlite3"))
-    monkeypatch.setenv("SENTRIX_CONTROL_API_KEY", "test-control-key")
-    monkeypatch.setenv("SENTRIX_PREDICTOR", "mock")
-    monkeypatch.setenv("SENTRIX_VIDEO_TRANSPORT", "rtsp")
-    for key in ("PROTOCOL", "HOST", "PORT", "USER", "PASSWORD", "SHA256"):
-        monkeypatch.delenv("SENTRIX_RTSP_" + key, raising=False)
-    for key in ("SENTRIX_SOURCE_ID", "SENTRIX_STREAM_PATH", "SENTRIX_CAMERA_NAME"):
-        monkeypatch.delenv(key, raising=False)
-    from app.detections import DetectionStore
-    return DetectionStore(tmp_path / "detections.sqlite3")
-
 
 def test_default_rtsp_configuration(configured):
-    from app.rtsp_receiver import RTSPReceiver, StartSource
+    from app.infrastructure.streaming.rtsp import RTSPReceiver
+    from app.presentation.http.schemas import StartSource
     receiver = RTSPReceiver(lambda frames, timestamp: {}, detection_store=configured)
     camera = receiver.default_camera
     assert (camera.source_id, camera.stream_path) == ("camara1", "camera01")
@@ -34,28 +20,28 @@ def test_default_rtsp_configuration(configured):
 
 
 def test_invalid_protocol_rejected(configured, monkeypatch):
-    from app.rtsp_receiver import RTSPReceiver
+    from app.infrastructure.streaming.rtsp import RTSPReceiver
     monkeypatch.setenv("SENTRIX_RTSP_PROTOCOL", "https")
     with pytest.raises(ValueError, match="PROTOCOL"):
         RTSPReceiver(lambda frames, timestamp: {})
 
 
 def test_rtsps_still_requires_private_configuration(configured, monkeypatch):
-    from app.rtsp_receiver import RTSPReceiver
+    from app.infrastructure.streaming.rtsp import RTSPReceiver
     monkeypatch.setenv("SENTRIX_RTSP_PROTOCOL", "rtsps")
     with pytest.raises(ValueError, match="RTSPS requiere"):
         RTSPReceiver(lambda frames, timestamp: {})
 
 
 def test_livekit_transport_removed(configured):
-    from app.main import create_app
+    from app.bootstrap import create_app
     with pytest.raises(ValueError, match="webrtc o rtsp"):
         create_app(mode="mock", transport="livekit")
     assert not any(name == "livekit" or name.startswith("livekit.") for name in sys.modules)
 
 
 def test_camera_endpoints(configured, monkeypatch):
-    from app.main import create_app
+    from app.bootstrap import create_app
     app = create_app(mode="mock", transport="rtsp")
 
     async def idle_reader(session):
@@ -86,7 +72,9 @@ def test_camera_endpoints(configured, monkeypatch):
                 state = (await client.get("/sources/camara1/status")).json()
                 assert state["active"] is True and state["frames_received"] == 0
                 assert (await client.delete("/sources/camara1")).status_code == 200
-                assert (await client.delete("/cameras/camara1")).status_code == 409
+                # La baja de la ultima camara ya estaba habilitada en la copia local.
+                assert (await client.delete("/cameras/camara1")).status_code == 200
+                assert (await client.get("/cameras/camara1")).status_code == 404
                 assert isinstance((await client.get("/detections?camera=camara1&limit=10")).json(), list)
                 assert "items" in (await client.get("/alerts?camera=camara1&limit=30")).json()
                 assert "items" in (await client.get("/inference-logs?limit=10")).json()
