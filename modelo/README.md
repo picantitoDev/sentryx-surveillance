@@ -49,10 +49,11 @@ archivos `videomae_crime5_continuous.onnx` y
 Consultar el repositorio de Hugging Face para los archivos publicados.
 El backend requiere los dos archivos ONNX indicados arriba; deben corresponder
 a la versión compatible con estos metadatos.
-`SHA256SUMS.txt` contiene los hashes esperados. No modificar los metadatos para
-acomodar otra versión del modelo sin validar su compatibilidad.
+Solicitar también al responsable del modelo los hashes SHA-256 esperados. No
+modificar los metadatos para acomodar otra versión del modelo sin validar su
+compatibilidad.
 
-En PowerShell, desde la raíz del repositorio:
+Para calcular los hashes en PowerShell, desde la raíz del repositorio:
 
 ```powershell
 Get-FileHash modelo/videomae_crime5_continuous.onnx -Algorithm SHA256

@@ -1,14 +1,5 @@
 # SentriX — backend VideoMAE en GPU
 
-## Daily: demo simulada y consulta del historial
-
-Desde la raíz del repositorio, ejecutar `.\.venv\Scripts\python.exe backend/examples/demo.py`.
-Una vez terminado, `./backend/start_daily.ps1` inicia el servidor de consulta
-en http://127.0.0.1:8001/docs con las bases de `backend/data/daily`.
-No necesita LiveKit ni GPU. El script selecciona la configuración de demo
-sin modificar `.env` y restaura las variables de la terminal al salir.
-Detener un servidor anterior en ese puerto con Ctrl+C antes de arrancarlo.
-
 ## EN-4: eventos confirmados con inicio y fin
 
 El stream abre un único evento por sesión tras dos ventanas consecutivas de la
@@ -126,7 +117,6 @@ sin política temporal, porque cada petición es independiente.
 422 para entrada inválida, 413 si supera 2 MiB, 503 si falla el modelo.
 Clips completos de 224×224 en JSON normalmente exceden el límite de 2 MiB.
 Para transmisión usar WebRTC, que procesa frames directamente en memoria.
-`examples/request.json` es un ejemplo del simulador con dos frames.
 No enviar píxeles JSON desde el frontend para el stream.
 
 ## Validación
