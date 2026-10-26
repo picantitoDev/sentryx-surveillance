@@ -28,9 +28,6 @@ preprocesamiento permanecen iguales. Ejecutar un único proceso del backend.
 devuelve el evento persistido. POST /predict continúa siendo independiente y
 no evalúa intervalos temporales. El mock de stream sí permite probar la política.
 
-Contrato: [CONTRATO_ALERTAS_FRONTEND.md](../docs/backend/CONTRATO_ALERTAS_FRONTEND.md).
-Criterios para Sprint 1: [BACKLOG_EN3_EN4_SPRINT1.md](../docs/backend/BACKLOG_EN3_EN4_SPRINT1.md).
-
 ## TA-4: logs operativos persistentes
 
 El servicio registra inicio/cierre, carga del modelo, conexiones de fuentes,
@@ -43,7 +40,6 @@ el almacenamiento no está disponible.
 
 Consulta: `GET /inference-logs` y `GET /inference-logs/{log_id}`. Incluye filtros
 por cámara, evento, nivel y fechas con zona horaria, además de paginación.
-Contrato completo para frontend: [CONTRATO_LOGS_FRONTEND.md](../docs/backend/CONTRATO_LOGS_FRONTEND.md).
 
 El backend carga el modelo ONNX de `../modelo` una vez al arrancar y ejecuta
 una inferencia de calentamiento antes de aceptar conexiones. El modo predeterminado
@@ -51,8 +47,8 @@ es `videomae` con `cuda`; una carga fallida impide arrancar. No se sustituye
 el modelo real por CPU ni por MockPredictor automáticamente.
 
 **Conexión actual: LiveKit.** El backend se suscribe al video de Gabriel y Mari
-consulta los resultados por las mismas rutas HTTP. Configurar `backend/.env`
-según [LIVEKIT_BACKEND.md](../docs/backend/LIVEKIT_BACKEND.md). La conexión WebRTC directa
+consulta los resultados por las mismas rutas HTTP. Configurar `backend/.env` con
+las variables `LIVEKIT_*` (URL, sala, identidad del emisor y credenciales). La conexión WebRTC directa
 se conserva como alternativa explícita para pruebas.
 
 ## Instalar y arrancar
@@ -82,7 +78,9 @@ Esperar `Application startup complete`. Consultar http://localhost:8000/health:
 debe informar `model_loaded: true`, `gpu_active: true` y
 `CUDAExecutionProvider` en `providers`. Swagger: http://localhost:8000/docs.
 El servicio continúa usando la red privada Tailscale y CORS configurable por
-`FRONTEND_ORIGINS`. No tiene autenticación propia.
+`FRONTEND_ORIGINS`. Todas las rutas excepto `/health`, `/docs`, `/redoc` y
+`/openapi.json` exigen el encabezado `X-API-Key` con el valor de
+`SENTRIX_CONTROL_API_KEY`; en Swagger se envía con Authorize.
 
 Para ejecutar CPU deliberadamente, cambiar `SENTRIX_PROVIDER=cpu` en el comando
 manual. Para pruebas con el simulador, `SENTRIX_PREDICTOR=mock`; /health declara
@@ -118,8 +116,6 @@ A 25 FPS, la primera ventana comprende 2.4 s entre sus extremos y la cadencia
 es 2.56 s por ventana. A 30 FPS son 2 s y 2.13 s, antes de sumar recepción y
 procesamiento. La confirmación necesita dos ventanas candidatas de la misma
 clase. Inferencia de ~73 ms no equivale a latencia de detección.
-
-Contrato para la compañera: [RESULTADOS_VIDEOMAE.md](../docs/backend/RESULTADOS_VIDEOMAE.md).
 
 ## POST /predict
 
@@ -208,7 +204,7 @@ como error de procesamiento y no publica esa ventana como procesada con éxito.
 No se incluye una cola de reintento durable. Las pruebas usan bases temporales
 para evitar escribir detecciones simuladas en el historial de operación.
 
-## PostgreSQL y usuarios
+## PostgreSQL
 
-Configurar `SENTRIX_DATABASE_URL` en `backend/.env`. Detecciones, alertas, logs
-y usuarios usan PostgreSQL. Consultar [configuración y migración](../docs/backend/DATABASE.md).
+Configurar `SENTRIX_DATABASE_URL` en `backend/.env`. Detecciones, alertas y logs
+usan PostgreSQL.

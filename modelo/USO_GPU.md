@@ -17,7 +17,3 @@ El script exige CUDA y no cambia automáticamente a CPU ni al simulador.
 No instalar onnxruntime y onnxruntime-gpu simultáneamente en el mismo entorno.
 
 El backend usa los mismos metadatos y helpers de preprocesamiento que el modelo.
-La política EN-4 de eventos por sesión está documentada en el
-[contrato de alertas](../docs/backend/CONTRATO_ALERTAS_FRONTEND.md).
-El contrato de resultados está en
-[RESULTADOS_VIDEOMAE.md](../docs/backend/RESULTADOS_VIDEOMAE.md).
