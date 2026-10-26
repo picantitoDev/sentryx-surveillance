@@ -188,3 +188,16 @@ Despliegue actual: [sentryx-surveillance.vercel.app](https://sentryx-surveillanc
 ## Licencia
 
 Este repositorio no incluye actualmente una licencia de distribución. Hasta que se añada una, el código debe considerarse de uso reservado por sus autores.
+
+## Backend de inferencia SentriX
+
+El frontend SvelteKit permanece en la raíz (`src/`, `static/`, `package.json`).
+El backend Python está en `backend/`, y los adaptadores/metadatos de VideoMAE
+en `modelo/`. Los pesos se distribuyen aparte.
+
+- [Instalación, ejecución y pruebas del backend](backend/README.md)
+- [Modelo y obtención de pesos](modelo/README.md)
+
+La configuración privada del backend vive en `backend/.env`; el `.env` de la
+raíz pertenece al frontend. Ninguno se versiona. Ejecutar un único proceso del
+backend. Las rutas WebRTC directas corresponden al modo alternativo explícito.
