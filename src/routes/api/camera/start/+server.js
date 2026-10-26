@@ -1,0 +1,13 @@
+import { json } from '@sveltejs/kit';
+import { CameraNotFoundError } from '#application/cameras/camera-service.js';
+import { cameraService } from '#presentation/server/server-services.js';
+
+export async function POST({ request }) {
+  const body = await request.json().catch(() => ({}));
+  try {
+    return json({ source: await cameraService.start(body.id) });
+  } catch (error) {
+    if (error instanceof CameraNotFoundError) return json({ error: error.message }, { status: 404 });
+    return json({ error: error instanceof Error ? error.message : String(error) }, { status: 502 });
+  }
+}

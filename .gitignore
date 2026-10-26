@@ -67,3 +67,9 @@ htmlcov/
 # Pesos distribuidos aparte, en cualquier carpeta
 *.onnx
 *.onnx.data
+
+# Reglas del frontend (main)
+node_modules/
+.svelte-kit/
+build/
+data/*.json
