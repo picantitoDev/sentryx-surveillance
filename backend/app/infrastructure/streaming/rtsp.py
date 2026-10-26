@@ -12,7 +12,6 @@ import secrets
 import socket
 import ssl
 import time
-import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from urllib.parse import quote
@@ -91,12 +90,6 @@ class RTSPReceiver(WebRTCReceiver):
         if self.protocol == "rtsps" and not (self.password and self.fingerprint):
             raise ValueError("RTSPS requiere SENTRIX_RTSP_PASSWORD y SENTRIX_RTSP_SHA256")
         # La dirección viene de configuración privada, nunca del cuerpo HTTP.
-        ipaddress.IPv4Address(self.host)
-        if not 1 <= self.port <= 65535:
-            raise ValueError("SENTRIX_RTSP_PORT debe estar entre 1 y 65535")
-        normalized = self.fingerprint.replace(":", "").strip().upper()
-        if self.protocol == "rtsps" and (len(normalized) != 64 or any(c not in "0123456789ABCDEF" for c in normalized)):
-            raise ValueError("SENTRIX_RTSP_SHA256 debe ser un SHA-256 hexadecimal")
         self.default_camera = CameraRegistration(
             source_id=os.getenv("SENTRIX_SOURCE_ID", "camara1"),
             name=os.getenv("SENTRIX_CAMERA_NAME", "Gabriel"),

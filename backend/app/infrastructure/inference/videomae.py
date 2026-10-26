@@ -107,9 +107,6 @@ class VideoMAEPredictor:
         # El servicio no declara modelo listo antes de una inferencia válida.
         self._run(np.zeros((1, 3, 16, 224, 224), dtype=np.float32), 0)
 
-    def new_policy(self):
-        return SessionAlertPolicy(self.metadata, self.helpers)
-
     def _run(self, tensor, timestamp):
         with self.lock:
             logits = self.session.run(None, {self.input_name: tensor})[0]

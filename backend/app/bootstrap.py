@@ -95,7 +95,7 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
                     provider = os.getenv("SENTRIX_PROVIDER", "cuda")
                     if provider not in ("cuda", "cpu"):
                         raise ValueError("SENTRIX_PROVIDER debe ser cuda o cpu; no hay fallback automático")
-                    logger.info("Cargando VideoMAE (%s); esperar antes de conectar WebRTC", provider)
+                    logger.info("Cargando VideoMAE (%s); esperar antes de conectar la fuente", provider)
                     app.state.predictor = await asyncio.to_thread(VideoMAEPredictor, provider=provider)
                 except Exception:
                     await asyncio.to_thread(log_store.emit, "model_error", "No se pudo cargar el modelo",
@@ -134,7 +134,6 @@ def create_app(predictor: Predictor | None = None, *, mode: str | None = None,
         unavailable="Almacenamiento de logs no disponible", missing="Log no encontrado")))
     app.include_router(alerts_router(RecordQueries(alert_store,
         unavailable="Almacenamiento de alertas no disponible", missing="Alerta no encontrada")))
-    app.state.webrtc = receiver
     app.state.video_receiver = receiver
     app.state.detection_store = store
     app.state.log_store = log_store
