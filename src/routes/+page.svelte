@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
   type ViewId = 'overview' | 'monitor' | 'cameras' | 'detections' | 'alerts' | 'service';
   type LogLevel = 'all' | 'INFO' | 'WARNING' | 'ERROR' | 'DEBUG' | 'CRITICAL';
@@ -55,6 +55,17 @@
   let logQuery = $state('');
   let logPage = $state(1);
   const LOG_PAGE_SIZE = 5;
+  let dialogElement = $state<HTMLDivElement | null>(null);
+  let openerElement: HTMLElement | null = null;
+  let accessibilityOpen = $state(false);
+  let highContrast = $state(false);
+  let reducedMotion = $state(false);
+  let textSize = $state<'normal' | 'large' | 'xlarge'>('normal');
+  let highlightLinks = $state(false);
+  let hideImages = $state(false);
+  let dyslexiaMode = $state(false);
+  let lineSpacing = $state(false);
+  let alignedText = $state(false);
 
   let camera = $derived(cameras.find((item) => item.id === selectedId) ?? cameras[0] ?? null);
   let source = $derived(inference?.source ?? null);
@@ -182,6 +193,14 @@
     const requestedView = params.get('view');
     if (menu.some((item) => item.id === requestedView)) view = requestedView as ViewId;
     if (params.get('modal') === 'camera') modal = true;
+    try {
+      const saved = JSON.parse(localStorage.getItem('sentrix-accessibility') ?? '{}');
+      highContrast = saved.highContrast === true;
+      reducedMotion = saved.reducedMotion === true;
+      textSize = ['normal', 'large', 'xlarge'].includes(saved.textSize) ? saved.textSize : 'normal';
+      highlightLinks = saved.highlightLinks === true; hideImages = saved.hideImages === true;
+      dyslexiaMode = saved.dyslexiaMode === true; lineSpacing = saved.lineSpacing === true; alignedText = saved.alignedText === true;
+    } catch { /* Las preferencias son opcionales. */ }
     loadCamera().then(() => {
       if (!mounted) return;
       refreshAllInference();
@@ -273,7 +292,33 @@
       (itemSource?.last_frame_age_seconds == null || Number(itemSource.last_frame_age_seconds) <= 10);
   }
   function go(id: ViewId) { view = id; clearFeedback(); if (id === 'monitor') monitorExpanded = false; if (id === 'service') refreshServiceLogs(); }
-  function showRegistration() { clearFeedback(); name = ''; url = ''; modal = true; }
+  async function showRegistration(event?: MouseEvent) {
+    openerElement = event?.currentTarget instanceof HTMLElement ? event.currentTarget : document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    clearFeedback(); name = ''; url = ''; modal = true;
+    await tick();
+    dialogElement?.querySelector<HTMLElement>('[data-dialog-initial-focus]')?.focus();
+  }
+  function closeRegistration() {
+    modal = false;
+    tick().then(() => openerElement?.focus());
+  }
+  function saveAccessibilityPreferences() {
+    localStorage.setItem('sentrix-accessibility', JSON.stringify({ highContrast, reducedMotion, textSize, highlightLinks, hideImages, dyslexiaMode, lineSpacing, alignedText }));
+  }
+  function setTextSize(value: 'normal' | 'large' | 'xlarge') { textSize = value; saveAccessibilityPreferences(); }
+  function resetAccessibilityPreferences() {
+    highContrast = false; reducedMotion = false; textSize = 'normal'; highlightLinks = false; hideImages = false; dyslexiaMode = false; lineSpacing = false; alignedText = false; saveAccessibilityPreferences();
+  }  function handleDialogKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') { event.preventDefault(); closeRegistration(); return; }
+    if (event.key !== 'Tab' || !dialogElement) return;
+    const focusable = [...dialogElement.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter((element) => !element.hidden);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
   async function selectCamera(target: Camera, destination: ViewId = 'monitor') {
     selectedId = target.id; inference = inferenceByCamera[target.id] ?? null; view = destination; showPlayer = true; monitorExpanded = destination === 'monitor';
     await refreshInference(target.id);
@@ -288,9 +333,10 @@
   <title>SentriX — Centro de monitoreo</title>
   <meta name="description" content="Monitoreo, detecciones y alertas de cámaras con MediaMTX y FastAPI" />
 </svelte:head>
+<a class="skip-link" href="#main-content">Saltar al contenido principal</a>
 
-<div class="shell">
-  <aside class="sidebar">
+<div class="shell" class:a11y-high-contrast={highContrast} class:a11y-reduced-motion={reducedMotion} class:a11y-text-large={textSize === 'large'} class:a11y-text-xlarge={textSize === 'xlarge'} class:a11y-highlight-links={highlightLinks} class:a11y-hide-images={hideImages} class:a11y-dyslexia={dyslexiaMode} class:a11y-line-spacing={lineSpacing} class:a11y-aligned-text={alignedText}>
+  <aside class="sidebar" aria-label="Panel lateral">
     <a class="brand" href="/" onclick={(e) => { e.preventDefault(); go('overview'); }}>
       <span class="brand-emblem"><img src="/sentrix-logo.png" alt="" /></span>
       <span class="brand-lockup"><strong>Sentri<span>X</span></strong><small>Sistema de vigilancia inteligente</small></span>
@@ -298,13 +344,13 @@
     <div class="menu-label">ESPACIO DE TRABAJO</div>
     <nav aria-label="Navegación principal">
       {#each menu as item}
-        <button type="button" class:current={view === item.id} onclick={() => go(item.id)}>
+        <button type="button" class:current={view === item.id} aria-current={view === item.id ? 'page' : undefined} onclick={() => go(item.id)}>
           <span class="nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span>
         </button>
       {/each}
     </nav>
     <div class="side-bottom">
-      <div class="system-state"><span class:live={aiReceiving} class="led"></span><div><strong>Servicio de inferencia</strong><small>{aiReceiving ? 'Procesando video' : aiConnected ? 'Conectado · sin recepción confirmada' : 'Sin conexión'}</small></div></div>
+      <div class="system-state" role="status" aria-label={`Servicio de inferencia: ${aiReceiving ? 'procesando video' : aiConnected ? 'conectado sin recepción confirmada' : 'sin conexión'}`}><span class:live={aiReceiving} class="led" aria-hidden="true"></span><div><strong>Servicio de inferencia</strong><small>{aiReceiving ? 'Procesando video' : aiConnected ? 'Conectado · sin recepción confirmada' : 'Sin conexión'}</small></div></div>
       <p>Prototipo académico · múltiples cámaras</p>
     </div>
   </aside>
@@ -312,9 +358,28 @@
   <div class="workspace">
     <header class="topbar">
       <div class="breadcrumb">OPERACIONES <span>/</span> <strong>{menu.find((m) => m.id === view)?.label}</strong></div>
-      <div class="topbar-right"><span class="server-label">São Paulo <i></i> MediaMTX</span><span class="avatar" title="Operador">OP</span><span class="operator">Operador</span></div>
+      <div class="topbar-right"><button class="accessibility-trigger" type="button" aria-expanded={accessibilityOpen} aria-controls="accessibility-panel" onclick={() => accessibilityOpen = !accessibilityOpen}><span class="accessibility-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/><circle class="person-head" cx="24" cy="13" r="3.4"/><path d="M13 20.5c4.5 2.6 17.5 2.6 22 0M24 17v12m0 0-8 9m8-9 8 9"/></svg></span><span>Accesibilidad</span></button><span class="server-label">São Paulo <i aria-hidden="true"></i> MediaMTX</span><span class="avatar" aria-label="Operador">OP</span><span class="operator">Operador</span></div>
     </header>
-    <main>
+    {#if accessibilityOpen}
+      <aside id="accessibility-panel" class="accessibility-panel" aria-label="Menú de accesibilidad">
+        <div class="accessibility-panel-head"><div><p class="a11y-kicker">SENTRIX</p><h2>Menú de accesibilidad</h2></div><button type="button" class="a11y-close" aria-label="Cerrar menú de accesibilidad" onclick={() => accessibilityOpen = false}>×</button></div>
+        <p class="a11y-intro">Elige los ajustes que necesitas. Se guardan en este navegador.</p>
+        <div class="a11y-grid">
+          <button type="button" class:active={highContrast} aria-pressed={highContrast} onclick={() => { highContrast = !highContrast; saveAccessibilityPreferences(); }}><span aria-hidden="true">◐</span><strong>Contraste +</strong></button>
+          <button type="button" class:active={highlightLinks} aria-pressed={highlightLinks} onclick={() => { highlightLinks = !highlightLinks; saveAccessibilityPreferences(); }}><span aria-hidden="true">⛓</span><strong>Resaltar enlaces</strong></button>
+          <button type="button" class:active={textSize !== 'normal'} aria-pressed={textSize !== 'normal'} onclick={() => setTextSize(textSize === 'normal' ? 'large' : textSize === 'large' ? 'xlarge' : 'normal')}><span aria-hidden="true">Tᵀ</span><strong>Agrandar texto</strong><small>{textSize === 'normal' ? 'Normal' : textSize === 'large' ? 'Grande' : 'Muy grande'}</small></button>
+          <button type="button" class:active={lineSpacing} aria-pressed={lineSpacing} onclick={() => { lineSpacing = !lineSpacing; saveAccessibilityPreferences(); }}><span aria-hidden="true">↔</span><strong>Espaciado de texto</strong></button>
+          <button type="button" class:active={reducedMotion} aria-pressed={reducedMotion} onclick={() => { reducedMotion = !reducedMotion; saveAccessibilityPreferences(); }}><span aria-hidden="true">◌</span><strong>Detener animaciones</strong></button>
+          <button type="button" class:active={hideImages} aria-pressed={hideImages} onclick={() => { hideImages = !hideImages; saveAccessibilityPreferences(); }}><span aria-hidden="true">▧</span><strong>Ocultar imágenes</strong></button>
+          <button type="button" class:active={dyslexiaMode} aria-pressed={dyslexiaMode} onclick={() => { dyslexiaMode = !dyslexiaMode; saveAccessibilityPreferences(); }}><span aria-hidden="true">Dƒ</span><strong>Lectura asistida</strong></button>
+          <button type="button" class:active={alignedText} aria-pressed={alignedText} onclick={() => { alignedText = !alignedText; saveAccessibilityPreferences(); }}><span aria-hidden="true">☰</span><strong>Texto alineado</strong></button>
+        </div>
+        <div class="a11y-reader-note"><strong>Lectores de pantalla</strong><p>Compatible con NVDA, Narrador de Windows, VoiceOver y TalkBack. Activa el lector desde tu dispositivo.</p></div>
+        <button type="button" class="a11y-reset" onclick={resetAccessibilityPreferences}><span aria-hidden="true">↻</span> Restablecer configuraciones</button>
+      </aside>
+    {/if}
+    <main id="main-content" tabindex="-1">
+      <p class="sr-only" role="status" aria-live="polite">Vista actual: {menu.find((m) => m.id === view)?.label}</p>
       <div class="page-head">
         <div>
           <div class="eyebrow">SISTEMA DE VIGILANCIA INTELIGENTE</div>
@@ -334,15 +399,15 @@
 
       {#if view === 'overview'}
         <div class="overview-stats">
-          <button class="overview-stat" onclick={() => go('cameras')}><span>Cámaras activas</span><div><strong>{activeCameraCount}</strong><i>↗</i></div></button>
-          <button class="overview-stat" onclick={() => go('monitor')}><span>Transmisiones activas</span><div><strong>{activeTransmissionCount}</strong><i>↗</i></div></button>
-          <button class="overview-stat" onclick={() => go('detections')}><span>Detecciones de hoy</span><div><strong>{todayDetections.length}</strong><i>↗</i></div></button>
-          <button class="overview-stat alert-card" onclick={() => go('alerts')}><span>Alertas activas</span><div><strong>{activeAlerts.length}</strong><i>!</i></div></button>
+          <button class="overview-stat" onclick={() => go('cameras')}><span>Cámaras activas</span><div><strong>{activeCameraCount}</strong><i aria-hidden="true">↗</i></div></button>
+          <button class="overview-stat" onclick={() => go('monitor')}><span>Transmisiones activas</span><div><strong>{activeTransmissionCount}</strong><i aria-hidden="true">↗</i></div></button>
+          <button class="overview-stat" onclick={() => go('detections')}><span>Detecciones de hoy</span><div><strong>{todayDetections.length}</strong><i aria-hidden="true">↗</i></div></button>
+          <button class="overview-stat alert-card" onclick={() => go('alerts')}><span>Alertas activas</span><div><strong>{activeAlerts.length}</strong><i aria-hidden="true">!</i></div></button>
         </div>
 
         <section class="surface recent-activity">
           <div class="overview-section-head"><h2>Actividad reciente</h2><button class="btn secondary" onclick={() => go('detections')}>Ver detecciones →</button></div>
-          <div class="table-scroll"><table class="overview-table"><thead><tr><th>Hora</th><th>Cámara</th><th>Acción estimada</th><th>Puntuación</th></tr></thead>
+          <div class="table-scroll"><table class="overview-table"><caption class="sr-only">Actividad reciente de detecciones</caption><thead><tr><th scope="col">Hora</th><th scope="col">Cámara</th><th scope="col">Acción estimada</th><th scope="col">Puntuación</th></tr></thead>
             <tbody>
               {#each recentOverviewDetections as detection, index (detection.id ?? `${detection.fecha_hora}-${index}`)}
                 <tr><td>{fmtTime(detection.fecha_hora ?? detection.created_at)}</td><td>{detection.camera ?? '—'}</td><td>{labelClass(detection.clase ?? detection.class_name)}</td><td>{confidence(detection.confianza)}</td></tr>
@@ -374,10 +439,10 @@
       {:else if view === 'cameras'}
         <section class="surface table-surface">
           <div class="section-title"><div><h2>Inventario de cámaras</h2><p>Fuentes registradas en este entorno</p></div><span class="pill neutral">{cameras.length ? `${cameras.length} ${cameras.length === 1 ? 'registro' : 'registros'}` : 'Sin registros'}</span></div>
-          {#if loading}<div class="empty">Cargando cámaras...</div>
+          {#if loading}<div class="empty" role="status" aria-live="polite">Cargando cámaras...</div>
           {:else if !cameras.length}<div class="empty"><span class="placeholder-icon">▣</span><h3>Aún no hay cámaras</h3><p>Registra una transmisión para habilitar el monitor.</p><button class="btn primary" onclick={showRegistration}>Agregar cámara</button></div>
           {:else}
-            <div class="table-scroll"><table><thead><tr><th>Nombre / identificador</th><th>Origen</th><th>Estado de IA</th><th>Fecha de registro</th><th>Acciones</th></tr></thead>
+            <div class="table-scroll"><table><caption class="sr-only">Inventario de cámaras registradas</caption><thead><tr><th scope="col">Nombre / identificador</th><th scope="col">Origen</th><th scope="col">Estado de IA</th><th scope="col">Fecha de registro</th><th scope="col">Acciones</th></tr></thead>
               <tbody>{#each cameras as item (item.id)}<tr><td><strong>{cameraLabel(item)}</strong><small>{item.name}</small></td><td><span class="source-type">MediaMTX · WebRTC</span></td><td><span class="pill neutral">Registrada</span></td><td>{fmtDate(item.registeredAt)}</td><td><div class="table-actions"><button class="text-btn" onclick={() => selectCamera(item)}>Ver monitor</button><button class="text-btn" onclick={() => activateInference(item)} disabled={busy}>Reintentar IA</button><button class="text-btn destructive" onclick={() => deleteCamera(item)} disabled={busy}>Eliminar</button></div></td></tr>{/each}</tbody>
             </table></div>
           {/if}
@@ -392,7 +457,7 @@
                 <div class="camera-tile-head"><h2>{cameraLabel(item)}</h2><span class:positive={cameraIsOnline(item.id)} class="pill">{cameraIsOnline(item.id) ? 'En línea' : inferenceByCamera[item.id]?.available ? 'Conectada' : 'No disponible'}</span></div>
                 <div class="tile-stream">
                   <iframe src={item.url} title={`Video de ${item.name}`} allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
-                  <span class="source-mark">SOURCE&nbsp;&nbsp;/&nbsp;&nbsp;CCTV</span>
+                  <span class="source-mark" aria-hidden="true">SOURCE&nbsp;&nbsp;/&nbsp;&nbsp;CCTV</span>
                 </div>
                 <div class="camera-tile-foot">
                   <span class="tile-detection">{latestFor(item.id) ? `${labelClass(latestFor(item.id)?.clase ?? latestFor(item.id)?.class_name)} · ${confidence(latestFor(item.id)?.confianza)}` : 'Esperando predicción'}</span>
@@ -413,7 +478,7 @@
             </section>
             <div class="monitor-aside">
               <section class="surface"><div class="section-title"><div><h2>Inteligencia artificial</h2><p>Estado de FastAPI</p></div><span class:positive={aiReceiving} class="pill">{aiReceiving ? 'Analizando' : aiConnected ? 'Conectada' : 'No disponible'}</span></div>
-                <div class="metric-list" aria-live="polite"><div><span>Estado técnico del receptor</span><strong>{source?.status ?? '—'}</strong></div><div><span>Fotogramas recibidos</span><strong>{source?.frames_received ?? '—'}</strong></div><div><span>Ventanas procesadas</span><strong>{source?.windows_processed ?? '—'}</strong></div><div><span>Último procesamiento</span><strong>{latestProcessingMs == null ? '—' : `${Number(latestProcessingMs).toFixed(2)} ms`}</strong></div><div><span>Último fotograma</span><strong>{source?.last_frame_age_seconds == null ? '—' : `${source.last_frame_age_seconds} s`}</strong></div></div>
+                <div class="metric-list"><div><span>Estado técnico del receptor</span><strong>{source?.status ?? '—'}</strong></div><div><span>Fotogramas recibidos</span><strong>{source?.frames_received ?? '—'}</strong></div><div><span>Ventanas procesadas</span><strong>{source?.windows_processed ?? '—'}</strong></div><div><span>Último procesamiento</span><strong>{latestProcessingMs == null ? '—' : `${Number(latestProcessingMs).toFixed(2)} ms`}</strong></div><div><span>Último fotograma</span><strong>{source?.last_frame_age_seconds == null ? '—' : `${source.last_frame_age_seconds} s`}</strong></div></div>
                 <button class="btn secondary full" onclick={() => activateInference()} disabled={busy}>{busy ? 'Solicitando...' : 'Activar / reintentar IA'}</button>
               </section>
               <section class="surface"><div class="section-title"><div><h2>Predicción reciente</h2><p>Resultado de la última ventana</p></div></div>
@@ -428,22 +493,22 @@
         <section class="surface">
           <div class="section-title"><div><h2>Historial de detecciones</h2><p>Resultados disponibles a través de FastAPI</p></div><span class="pill neutral">{filteredDetections.length} resultados</span></div>
           <div class="filters"><label>Buscar acción<input placeholder="Buscar clasificación" bind:value={query} oninput={() => detectionPage = 1}/></label><label>Acción estimada<select bind:value={actionFilter} onchange={() => detectionPage = 1}><option value="all">Todas las acciones</option><option value="normal">Normal</option><option value="hurto">Hurto</option><option value="robo">Robo</option><option value="agresion_fisica">Agresión física</option><option value="vandalismo">Vandalismo</option></select></label><label>Desde<input type="date" bind:value={since} onchange={() => detectionPage = 1}/></label><label>Hasta<input type="date" bind:value={until} onchange={() => detectionPage = 1}/></label></div>
-          <div class="table-scroll"><table><thead><tr><th>Fecha y hora</th><th>Cámara</th><th>Acción estimada</th><th>Confianza</th></tr></thead><tbody>
+          <div class="table-scroll"><table><caption class="sr-only">Historial de detecciones</caption><thead><tr><th scope="col">Fecha y hora</th><th scope="col">Cámara</th><th scope="col">Acción estimada</th><th scope="col">Confianza</th></tr></thead><tbody>
             {#each paginatedDetections as detection, i (detection.id ?? `${detection.camera}-${detection.fecha_hora}-${i}`)}<tr><td>{fmtDate(detection.fecha_hora)}</td><td>{detection.camera ?? '—'}</td><td><strong>{labelClass(detection.clase)}</strong></td><td>{confidence(detection.confianza)}</td></tr>
             {:else}<tr><td colspan="4" class="table-empty">{aiConnected ? 'No hay detecciones para los filtros seleccionados.' : 'Sin registros disponibles. Verifica la conexión con FastAPI.'}</td></tr>{/each}
           </tbody></table></div>
           {#if filteredDetections.length > 0}
-            <div class="log-pagination detection-pagination">
+            <nav class="log-pagination detection-pagination" aria-label="Paginación de detecciones">
               <span>Mostrando {(currentDetectionPage - 1) * DETECTION_PAGE_SIZE + 1}–{Math.min(currentDetectionPage * DETECTION_PAGE_SIZE, filteredDetections.length)} de {filteredDetections.length} detecciones</span>
               <div><button class="text-btn" onclick={() => detectionPage = Math.max(1, currentDetectionPage - 1)} disabled={currentDetectionPage === 1}>← Anterior</button><strong>Página {currentDetectionPage} de {detectionPageCount}</strong><button class="text-btn" onclick={() => detectionPage = Math.min(detectionPageCount, currentDetectionPage + 1)} disabled={currentDetectionPage === detectionPageCount}>Siguiente →</button></div>
-            </div>
+            </nav>
           {/if}
           <p class="footnote">Las detecciones de todas las cámaras se organizan en páginas de {DETECTION_PAGE_SIZE} registros.</p>
         </section>
 
       {:else if view === 'alerts'}
         <section class="surface"><div class="section-title"><div><h2>Eventos confirmados</h2><p>Las alertas no equivalen a cada clasificación individual</p></div><span class="pill neutral">{alerts.length} eventos</span></div>
-          {#if alerts.length}<div class="event-list">{#each alerts as alert, i (alert.id ?? `${alert.fecha_hora}-${i}`)}<div class="event"><span class="event-symbol">!</span><div><strong>{labelClass(alert.clase)}</strong><p>{fmtDate(alert.fecha_hora)} · {camera?.id ?? '—'}</p></div><span class="pill">{alert.status ?? 'Registrado'}</span></div>{/each}</div>
+          {#if alerts.length}<div class="event-list">{#each alerts as alert, i (alert.id ?? `${alert.fecha_hora}-${i}`)}<div class="event"><span class="event-symbol" aria-hidden="true">!</span><div><strong>{labelClass(alert.clase)}</strong><p>{fmtDate(alert.fecha_hora)} · {camera?.id ?? '—'}</p></div><span class="pill">{alert.status ?? 'Registrado'}</span></div>{/each}</div>
           {:else}<div class="empty"><span class="placeholder-icon">◇</span><h3>No hay alertas confirmadas</h3><p>{aiConnected ? 'Cuando el sistema confirme un evento, aparecerá aquí.' : 'El servidor de inferencia debe estar disponible para consultar eventos.'}</p></div>{/if}
         </section>
 
@@ -457,15 +522,15 @@
             <label>Cámara<select bind:value={logCamera} onchange={() => logPage = 1}><option value="all">Todas las cámaras</option>{#each [...new Set(serviceLogs.map((log) => log.camera).filter(Boolean))] as cameraId}<option value={cameraId}>{cameraId}</option>{/each}</select></label>
           </div>
           {#if serviceLogsError}<div class="banner error logs-error"><strong>No se pudieron consultar los logs</strong><span>{serviceLogsError}</span></div>{/if}
-          <div class="table-scroll"><table class="logs-table"><thead><tr><th>Fecha y hora</th><th>Nivel</th><th>Cámara</th><th>Tipo de evento</th><th>Procesamiento</th><th>Inferencia</th><th>Mensaje</th></tr></thead><tbody>
+          <div class="table-scroll"><table class="logs-table"><caption class="sr-only">Historial técnico de inferencia</caption><thead><tr><th scope="col">Fecha y hora</th><th scope="col">Nivel</th><th scope="col">Cámara</th><th scope="col">Tipo de evento</th><th scope="col">Procesamiento</th><th scope="col">Inferencia</th><th scope="col">Mensaje</th></tr></thead><tbody>
             {#each paginatedServiceLogs as log, i (log.id ?? `${log.fecha_hora}-${i}`)}<tr><td>{fmtDate(log.fecha_hora)}</td><td><span class:error-level={String(log.level).toUpperCase() === 'ERROR'} class:warning-level={String(log.level).toUpperCase() === 'WARNING'} class="log-level">{log.level ?? '—'}</span></td><td>{log.camera ?? '—'}</td><td><strong>{log.event_type ?? '—'}</strong>{#if log.session_id}<small>Sesión: {log.session_id}</small>{/if}{#if log.window_id}<small>Ventana: {log.window_id}</small>{/if}</td><td>{log.processing_ms == null ? '—' : `${Number(log.processing_ms).toFixed(2)} ms`}</td><td>{log.inference_ms == null ? '—' : `${Number(log.inference_ms).toFixed(2)} ms`}</td><td class="log-message">{log.message ?? '—'}{#if log.detection_id}<small>Detección: {log.detection_id}</small>{/if}</td></tr>
             {:else}<tr><td colspan="7" class="table-empty">{serviceLogsLoading ? 'Consultando registros...' : serviceLogsError ? 'El servicio no está disponible. Usa “Actualizar” cuando FastAPI vuelva a responder.' : 'No hay registros en inference_logs para los filtros seleccionados.'}</td></tr>{/each}
           </tbody></table></div>
           {#if filteredServiceLogs.length > 0}
-            <div class="log-pagination">
+            <nav class="log-pagination" aria-label="Paginación de registros técnicos">
               <span>Mostrando {(currentLogPage - 1) * LOG_PAGE_SIZE + 1}–{Math.min(currentLogPage * LOG_PAGE_SIZE, filteredServiceLogs.length)} de {filteredServiceLogs.length} registros</span>
               <div><button class="text-btn" onclick={() => logPage = Math.max(1, currentLogPage - 1)} disabled={currentLogPage === 1}>← Anterior</button><strong>Página {currentLogPage} de {logPageCount}</strong><button class="text-btn" onclick={() => logPage = Math.min(logPageCount, currentLogPage + 1)} disabled={currentLogPage === logPageCount}>Siguiente →</button></div>
-            </div>
+            </nav>
           {/if}
           <p class="footnote logs-note">Esta vista presenta únicamente datos de <code>inference_logs</code>. Las detecciones y alertas permanecen almacenadas y consultadas por separado.</p>
         </section>
@@ -476,15 +541,15 @@
 </div>
 
 {#if modal}
-  <div class="modal-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) modal = false; }}>
-    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="dialog-top"><div><div class="eyebrow">CONFIGURACIÓN DE FUENTE</div><h2 id="modal-title">Registrar cámara</h2><p>Vincula una transmisión existente de MediaMTX.</p></div><button class="close" aria-label="Cerrar" onclick={() => modal = false}>×</button></div>
+  <div class="modal-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) closeRegistration(); }}>
+    <div class="dialog" bind:this={dialogElement} role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-description" onkeydown={handleDialogKeydown}>
+      <div class="dialog-top"><div><div class="eyebrow">CONFIGURACIÓN DE FUENTE</div><h2 id="modal-title">Registrar cámara</h2><p id="modal-description">Vincula una transmisión existente de MediaMTX.</p></div><button class="close" type="button" aria-label="Cerrar" onclick={closeRegistration}>×</button></div>
       <form onsubmit={registerCamera}>
-        <label for="name">Nombre de la cámara <span>*</span></label><input id="name" required maxlength="100" bind:value={name} placeholder="Ej. Cámara de entrada" />
+        <label for="name">Nombre de la cámara <span>*</span></label><input id="name" data-dialog-initial-focus required maxlength="100" bind:value={name} placeholder="Ej. Cámara de entrada" />
         <label for="url">Dirección WebRTC segura <span>*</span></label><input id="url" type="url" required pattern="https://.*" title="La dirección debe comenzar con https://" bind:value={url} placeholder="https://servidor/camera01/" />
         <p class="form-help">Por seguridad, solo se permiten direcciones que comiencen con <strong>https://</strong>.</p>
         <div class="info-note"><strong>Transmisión existente</strong><p>La cámara debe estar publicando antes de registrarla. Si la ruta ya está registrada, SentriX asignará automáticamente un identificador diferente al nuevo registro.</p></div>
-        <div class="modal-actions"><button type="button" class="btn secondary" onclick={() => modal = false}>Cancelar</button><button type="submit" class="btn primary" disabled={busy}>{busy ? 'Registrando...' : 'Registrar y activar IA'}</button></div>
+        <div class="modal-actions"><button type="button" class="btn secondary" onclick={closeRegistration}>Cancelar</button><button type="submit" class="btn primary" disabled={busy}>{busy ? 'Registrando...' : 'Registrar y activar IA'}</button></div>
       </form>
     </div>
   </div>
@@ -586,4 +651,26 @@
   @media(max-width:1050px){.brand{width:72px;padding:8px;justify-content:center}.brand-emblem{width:52px;height:58px;flex-basis:52px}.brand-emblem img{width:96px;height:96px;left:-22px;top:-6px}.brand-lockup{display:none}}
   @media(max-width:900px){.camera-wall{grid-template-columns:1fr}.overview-bottom{grid-template-columns:1fr}.recent-activity{padding:20px}.overview-table{min-width:620px}}
   @media(max-width:580px){.brand{width:58px;padding:7px}.brand-emblem{width:44px;height:50px;flex-basis:44px}.brand-emblem img{width:82px;height:82px;left:-19px;top:-5px}.log-filters{grid-template-columns:1fr;padding:0 17px 18px}.logs-error{margin:0 17px 18px}.logs-note{padding:0 17px 18px}.log-pagination{align-items:flex-start;flex-direction:column;padding:16px 17px}.log-pagination>div{width:100%;justify-content:space-between;gap:6px}.overview-stats{grid-template-columns:1fr}.overview-stat{min-height:130px}.overview-section-head{align-items:flex-start;flex-direction:column}.overview-bottom>.surface{padding:22px}.system-overview-list>div{align-items:flex-start;flex-direction:column;gap:8px}.demo-badge{margin-top:4px}.camera-tile{padding:12px}.camera-tile-foot{align-items:flex-start}.stream-actions{gap:7px}}
+/* Accesibilidad: foco visible y navegación por teclado (WCAG 2.2 AA). */
+.skip-link { position: fixed; top: 12px; left: 16px; z-index: 1000; transform: translateY(-180%); padding: 10px 14px; border-radius: 8px; background: var(--sx-navy, #082957); color: #fff; font-weight: 700; transition: transform 160ms ease; }
+.skip-link:focus { transform: translateY(0); }
+:global(:focus-visible) { outline: 3px solid var(--sx-cyan, #00b8e6); outline-offset: 3px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  /* Preferencias del usuario: reducción de movimiento y contraste reforzado. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+  }
+  @media (prefers-contrast: more) {
+    :global(body) { background: #fff; color: #000; }
+    .surface, .stat, .overview-stat, .btn, .text-btn, .filters input, .filters select, .dialog input { border-color: currentColor; }
+    .btn.primary, .overview-alert-button { background: #003f8f; color: #fff; }
+    .pill, .pill.neutral { border: 1px solid currentColor; }
+  }
+  .btn, .text-btn, .close, nav button { min-height: 24px; min-width: 24px; }
+  /* Panel visible de preferencias de accesibilidad. */
+  .accessibility-trigger{display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:5px 10px 5px 6px;border:1px solid #a9c5e2;border-radius:20px;color:#174b80;background:#fff;font-weight:750;font-size:12px}.accessibility-trigger:hover,.accessibility-trigger[aria-expanded="true"]{background:#eaf4ff;border-color:#075fd3}.accessibility-mark{width:27px;height:27px;display:grid;place-items:center;border-radius:50%;background:#075fd3}.accessibility-mark svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}.accessibility-mark svg>circle:first-child{fill:#075fd3;stroke:#12d7f2}.accessibility-mark .person-head{fill:#fff;stroke:none}
+  .accessibility-panel{position:fixed;z-index:70;top:0;right:0;width:min(430px,100vw);height:100dvh;overflow:auto;padding:0 18px 22px;background:#f1f4f8;color:#092650;box-shadow:-18px 0 44px #041b4352}.accessibility-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 -18px 16px;padding:21px 20px 18px;background:linear-gradient(135deg,#06275a,#075fd3);color:#fff}.a11y-kicker{margin:0 0 4px!important;color:#9fe9f7!important;font-size:10px!important;font-weight:800!important;letter-spacing:1.5px}.accessibility-panel h2{margin:0;font-size:21px;line-height:1.15}.a11y-close{width:44px;height:44px;border:2px solid #b9eafa;border-radius:50%;background:#0b4ead;color:#fff;font-size:33px;line-height:1}.a11y-intro{margin:0 3px 15px;color:#46627e;font-size:13px;line-height:1.45}.a11y-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.a11y-grid button{min-height:132px;padding:14px 10px;border:2px solid transparent;border-radius:13px;background:#fff;color:#092650;box-shadow:0 2px 7px #06275a10;font-weight:750;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;text-align:center}.a11y-grid button>span{font-size:35px;line-height:1;font-family:Arial,sans-serif}.a11y-grid button strong{font-size:14px;line-height:1.15}.a11y-grid button small{color:#54718f;font-size:11px}.a11y-grid button:hover,.a11y-grid button.active{border-color:#075fd3;background:#f7fbff}.a11y-grid button.active{box-shadow:inset 0 0 0 1px #12d7f2}.a11y-reader-note{margin:15px 0;padding:13px 14px;border:1px solid #badce8;border-radius:10px;background:#e8f7fa}.a11y-reader-note strong{font-size:14px}.a11y-reader-note p{margin:5px 0 0;color:#365b70;font-size:12px;line-height:1.45}.a11y-reset{width:100%;min-height:48px;border:0;border-radius:10px;background:#075fd3;color:#fff;font-size:14px;font-weight:800}.a11y-reset span{font-size:22px;vertical-align:-2px;margin-right:6px}
+  .shell.a11y-high-contrast{filter:contrast(1.25)}.shell.a11y-high-contrast .surface,.shell.a11y-high-contrast .stat,.shell.a11y-high-contrast .overview-stat{border-color:#000;box-shadow:none}.shell.a11y-high-contrast .sidebar{background:#000}.shell.a11y-high-contrast .btn.primary,.shell.a11y-high-contrast .overview-alert-button{background:#003f8f;color:#fff}.shell.a11y-reduced-motion *{animation:none!important;transition:none!important;scroll-behavior:auto!important}.shell.a11y-text-large{zoom:1.15}.shell.a11y-text-xlarge{zoom:1.3}.shell.a11y-highlight-links a:not(.brand){text-decoration:underline!important;text-decoration-thickness:2px!important;text-underline-offset:3px!important;color:#003f8f!important;font-weight:800}.shell.a11y-hide-images img:not(.accessibility-mark *){visibility:hidden}.shell.a11y-dyslexia{font-family:Verdana,Arial,sans-serif;letter-spacing:.04em;word-spacing:.08em}.shell.a11y-line-spacing p,.shell.a11y-line-spacing td{line-height:2!important;letter-spacing:.05em}.shell.a11y-aligned-text p,.shell.a11y-aligned-text td{text-align:left!important}
+  @media(max-width:580px){.accessibility-trigger{font-size:0;padding:5px}.accessibility-trigger>span:last-child{display:none}.accessibility-panel{width:100vw}.shell.a11y-text-large,.shell.a11y-text-xlarge{zoom:1}}
 </style>
+
