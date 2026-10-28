@@ -183,6 +183,8 @@ class RTSPReceiver(WebRTCReceiver):
                 # No registrar URL, password ni excepciones que incluyan la URL.
                 logger.warning("%s temporalmente no disponible para %s: %s",
                                camera.protocol.upper(), session.source_id, type(exc).__name__)
+                # Un corte se registra una sola vez; los reintentos siguientes solo van al log local.
+                new_outage = getattr(session, "rtsp_status", None) != "reconnecting"
                 session.rtsp_status = "reconnecting"
                 session.pc.connectionState = "disconnected"
                 session.last_error = f"Error de conexion: {type(exc).__name__}"
@@ -208,8 +210,9 @@ class RTSPReceiver(WebRTCReceiver):
                     else:
                         session.pending_alert_interruption = False
                 session.latest_result = None
-                await self._log_transport_event("transport_error", f"Stream {camera.protocol.upper()} interrumpido; reintentando",
-                                     session=session, level="WARNING")
+                if new_outage:
+                    await self._log_transport_event("transport_error", f"Stream {camera.protocol.upper()} interrumpido; reintentando",
+                                         session=session, level="WARNING")
             finally:
                 if container is not None:
                     try:
