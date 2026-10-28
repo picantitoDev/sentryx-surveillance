@@ -55,8 +55,11 @@ class WindowProcessor:
                         continue
                     result = session.alert_policy.update(result, samples[-1][1])
                     if runtime.alert_store is not None and detection is not None:
-                        stage = "alert_storage"
-                        event = await asyncio.to_thread(runtime.alert_store.apply, result, detection)
+                        event = None
+                        # Sin alerta activa ni cierre, apply solo consultaría: se evita ese acceso.
+                        if result["alert"]["active"] or result["alert"]["ended"]:
+                            stage = "alert_storage"
+                            event = await asyncio.to_thread(runtime.alert_store.apply, result, detection)
                         result["alert"]["id"] = event["id"] if event else None
                         result["alert"]["status"] = event["status"] if event else None
                         if result["alert"]["started"] or result["alert"]["ended"]:

@@ -40,3 +40,51 @@ def test_window_processor_persists_detections_and_resets_on_gaps(configured, tmp
             await receiver.close(session.id)
 
     asyncio.run(exercise())
+
+
+def test_window_processor_skips_alert_storage_without_active_alert(configured, tmp_path):
+    from app.domain.alerts import EventPolicy
+    from app.domain.pipeline import PipelineConfig, WindowBuffer
+    from app.infrastructure.persistence.alerts import AlertStore
+    from app.infrastructure.persistence.inference_logs import InferenceLogStore
+    from app.infrastructure.streaming.rtsp import RTSPReceiver, _RTSPPeer
+    from app.infrastructure.streaming.webrtc import Session
+
+    class CountingAlerts(AlertStore):
+        calls = 0
+
+        def apply(self, result, detection):
+            CountingAlerts.calls += 1
+            return super().apply(result, detection)
+
+    async def exercise():
+        alerts = CountingAlerts(configured.path)
+        logs = InferenceLogStore(tmp_path / "processing-logs.db")
+        receiver = RTSPReceiver(lambda *args: None, detection_store=configured, alert_store=alerts,
+                                log_store=logs, predict_frames=lambda frames, timestamp: {
+                                    "clase": "Normal" if timestamp < 3 else "Hurto", "confianza": .95,
+                                    "timestamp": timestamp, "simulated": True})
+        session = Session(pc=_RTSPPeer(), source_id="test",
+                          buffer=WindowBuffer(PipelineConfig(queue_size=4)), alert_policy=EventPolicy())
+        receiver.sessions[session.id] = session
+        for number in (1, 2, 3):
+            session.buffer.queue.put_nowait((number, [(object(), float(number))]))
+        task = asyncio.create_task(receiver.process_windows(session))
+        try:
+            await asyncio.wait_for(session.buffer.queue.join(), timeout=5)
+            # Normal, Normal y un primer candidato: sin alerta no se consulta la tabla.
+            assert CountingAlerts.calls == 0
+            assert session.latest_result["alert"]["id"] is None
+            assert session.latest_result["alert"]["status"] is None
+            session.buffer.queue.put_nowait((4, [(object(), 4.0)]))
+            await asyncio.wait_for(session.buffer.queue.join(), timeout=5)
+            assert CountingAlerts.calls == 1
+            assert session.latest_result["alert"]["status"] == "active"
+            assert alerts.list(status="active")["total"] == 1
+            assert len(configured.list()) == 4
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await receiver.close(session.id)
+
+    asyncio.run(exercise())
