@@ -7,3 +7,5 @@ build/
 data/*.json
 !data/.gitkeep
 .DS_Store
+playwright-report/
+test-results/
